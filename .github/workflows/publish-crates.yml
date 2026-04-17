@@ -63,6 +63,9 @@ jobs:
             echo "DRY RUN MODE — nothing will actually be published."
           fi
 
+          # crates.io's data-access policy requests a User-Agent on API calls.
+          UA="kode-publish-workflow (https://github.com/kyomi-ai/kode)"
+
           publish_if_new() {
             local crate="$1"
             local version
@@ -74,13 +77,27 @@ jobs:
               exit 1
             fi
 
-            if curl -sf "https://crates.io/api/v1/crates/$crate/$version" > /dev/null 2>&1; then
+            if curl -sf -A "$UA" "https://crates.io/api/v1/crates/$crate/$version" > /dev/null 2>&1; then
               echo "::notice::$crate@$version already published — skipping."
               return 0
             fi
 
             echo "Publishing $crate@$version..."
-            cargo publish -p "$crate" --no-verify $FLAGS
+            local out
+            if out=$(cargo publish -p "$crate" --no-verify $FLAGS 2>&1); then
+              echo "$out"
+            else
+              echo "$out"
+              # If crates.io says the version already exists, treat as skip — the
+              # pre-flight HTTP check can miss newly published crates due to
+              # index propagation lag or rate-limited API responses.
+              if echo "$out" | grep -qE "already (exists|uploaded)"; then
+                echo "::notice::$crate@$version already on crates.io — skipping."
+                return 0
+              fi
+              return 1
+            fi
+
             if [ "${{ inputs.dry_run }}" != "true" ]; then
               echo "Waiting 60s for crates.io index update..."
               sleep 60
