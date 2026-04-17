@@ -1,13 +1,21 @@
 [package]
 name = "kode-markdown"
-version = "0.2.0-alpha.1"
-edition = "2021"
-description = "Markdown intelligence layer for kode — parsing, commands, and input rules"
-license = "MIT"
+description = "Markdown intelligence for the kode editor — parsing, formatting commands, and input rules"
+keywords = ["editor", "markdown", "parser", "formatter", "commonmark"]
+categories = ["text-editors", "text-processing"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-kode-core = { path = "../kode-core" }
+kode-core = { path = "../kode-core", version = "0.1.0" }
 arborium-tree-sitter = "2.16"
 arborium-markdown = "2.16"
 
-[dev-dependencies]
+[lints]
+workspace = true

@@ -30,21 +30,18 @@ a toolkit of building blocks for editor experiences that feel native to the web.
 | `kode-leptos` | Leptos components: `CodeEditor`, `MarkdownEditorComponent`, `TreeWysiwygEditor`, toolbar, completion popup. |
 | `kode-markdown` | Markdown parser and formatting utilities. |
 | `kode-doc` | Structured document model (used by the WYSIWYG tree editor). |
-| `kode` | Re-exports and shared API surface. |
-| `demo` | Trunk-built SPA showing the full API in action. |
+| `kode-demo` | Trunk-built SPA showing the full API in action. |
 
 ## Installation
-
-Kode isn't on crates.io yet. Depend on it via a Git path:
 
 ```toml
 # In your Cargo.toml
 [dependencies]
-kode-leptos = { git = "https://github.com/kyomi-ai/kode.git" }
+kode-leptos = "0.1"
 leptos = { version = "0.8", features = ["csr"] }
 ```
 
-Or clone locally and use a path dependency for active development:
+For active local development, use a path dependency:
 
 ```toml
 kode-leptos = { path = "../kode/kode-leptos" }
@@ -330,7 +327,6 @@ kode/
 │   └── src/completion.rs
 ├── kode-markdown/       # markdown parser
 ├── kode-doc/            # document tree model
-├── kode/                # umbrella re-exports
 └── demo/                # Trunk SPA demo
 ```
 

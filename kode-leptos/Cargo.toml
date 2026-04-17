@@ -1,14 +1,21 @@
 [package]
 name = "kode-leptos"
-version = "0.2.0-alpha.1"
-edition = "2021"
-description = "A fast Leptos code editor component built on kode-core"
-license = "MIT"
+description = "Fast Leptos code editor + WYSIWYG markdown component — syntax highlighting, diagnostics, completions, theming"
+keywords = ["leptos", "editor", "code", "wysiwyg", "markdown"]
+categories = ["gui", "text-editors", "web-programming"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-kode-core = { path = "../kode-core" }
-kode-doc = { path = "../kode-doc" }
-kode-markdown = { path = "../kode-markdown" }
+kode-core = { path = "../kode-core", version = "0.1.0" }
+kode-doc = { path = "../kode-doc", version = "0.1.0" }
+kode-markdown = { path = "../kode-markdown", version = "0.1.0" }
 arborium-tree-sitter = "2.16"
 leptos = { version = "0.8", features = ["csr"] }
 arborium = { version = "2.16", default-features = false, features = [

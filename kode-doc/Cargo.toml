@@ -1,7 +1,16 @@
 [package]
 name = "kode-doc"
-version = "0.1.0"
+description = "Tree-based structured document model for WYSIWYG text editing — nodes, marks, fragments, transforms, undo"
+keywords = ["editor", "document", "tree", "prosemirror", "wysiwyg"]
+categories = ["text-editors", "data-structures"]
+version.workspace = true
 edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 arborium-tree-sitter = "2.16"

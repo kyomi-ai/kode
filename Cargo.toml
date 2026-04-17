@@ -1,6 +1,34 @@
 [workspace]
 resolver = "2"
-members = [
-    "kode-doc","kode-core", "kode-markdown", "kode-leptos", "kode", "demo"]
+members = ["kode-doc", "kode-core", "kode-markdown", "kode-leptos", "demo"]
 
-[workspace.lints]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Jason Adams <jason@yellowgorilla.net>"]
+repository = "https://github.com/kyomi-ai/kode"
+homepage = "https://github.com/kyomi-ai/kode"
+readme = "README.md"
+rust-version = "1.85"
+
+# Workspace-wide lint policy — deny level enforced by pre-commit hook.
+# "deny" (not "forbid") so macro-generated code that emits #[allow(...)]
+# (thiserror, test macros, etc.) doesn't fail the build.
+[workspace.lints.rust]
+dead_code = "deny"
+unused_imports = "deny"
+unused_variables = "deny"
+unused_mut = "deny"
+
+[workspace.lints.clippy]
+too_many_arguments = "deny"
+large_enum_variant = "deny"
+wrong_self_convention = "deny"
+
+# Optimize WASM release builds for size.
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true

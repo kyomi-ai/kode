@@ -390,7 +390,7 @@ impl MarkdownCommands {
             }
 
             // Only process other markers when NOT inside inline code
-            if code_count.is_multiple_of(2) {
+            if code_count % 2 == 0 {
                 if chars[i] == '~' && i + 1 < len && chars[i + 1] == '~' {
                     strike_count += 1;
                     if strike_count % 2 == 1 {

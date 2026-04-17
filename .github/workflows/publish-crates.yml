@@ -1,0 +1,98 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (--dry-run flag)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # OIDC Trusted Publishing. For the first publish of a crate that hasn't
+      # been claimed yet, this step fails — fall back to CARGO_REGISTRY_TOKEN
+      # secret until each crate has been published once and Trusted Publishing
+      # is configured on crates.io.
+      - name: Get crates.io publish token via OIDC
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@v1
+        continue-on-error: true
+
+      - name: Resolve publish token
+        id: token
+        env:
+          OIDC_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+          SECRET_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -n "$OIDC_TOKEN" ]; then
+            echo "Using OIDC token."
+            echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+          elif [ -n "$SECRET_TOKEN" ]; then
+            echo "Using CARGO_REGISTRY_TOKEN secret (bootstrap)."
+            echo "token=$SECRET_TOKEN" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No publish token available. Configure OIDC Trusted Publishing on crates.io or set CARGO_REGISTRY_TOKEN secret."
+            exit 1
+          fi
+
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          FLAGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            FLAGS="--dry-run"
+            echo "DRY RUN MODE — nothing will actually be published."
+          fi
+
+          publish_if_new() {
+            local crate="$1"
+            local version
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+
+            if [ -z "$version" ] || [ "$version" = "null" ]; then
+              echo "::error::Could not resolve version for $crate"
+              exit 1
+            fi
+
+            if curl -sf "https://crates.io/api/v1/crates/$crate/$version" > /dev/null 2>&1; then
+              echo "::notice::$crate@$version already published — skipping."
+              return 0
+            fi
+
+            echo "Publishing $crate@$version..."
+            cargo publish -p "$crate" --no-verify $FLAGS
+            if [ "${{ inputs.dry_run }}" != "true" ]; then
+              echo "Waiting 60s for crates.io index update..."
+              sleep 60
+            fi
+          }
+
+          echo "=== Tier 1 — no internal deps ==="
+          publish_if_new kode-core
+          publish_if_new kode-doc
+
+          echo "=== Tier 2 — depends on kode-core ==="
+          publish_if_new kode-markdown
+
+          echo "=== Tier 3 — depends on kode-core, kode-doc, kode-markdown ==="
+          publish_if_new kode-leptos
