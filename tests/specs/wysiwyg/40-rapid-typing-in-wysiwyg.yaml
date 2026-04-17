@@ -1,0 +1,17 @@
+name: "Fast typing in WYSIWYG — all characters appear, no missing text"
+scenario: "40-rapid-typing-in-wysiwyg"
+editor: wysiwyg
+tags: [typing, performance]
+description: >
+  Rapidly typing text should result in all characters being rendered with no
+  missing characters or visual glitches.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - all_typed_characters_visible: true
+    - no_visual_artifacts: true

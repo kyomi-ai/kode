@@ -1,0 +1,18 @@
+name: "Type immediately after Enter — text appears on new line without delay"
+scenario: "68-enter-then-type-renders-immediately"
+editor: wysiwyg
+tags: [enter, typing, performance, newline]
+description: >
+  Typing immediately after pressing Enter should render text on the new line
+  without any visible delay or rendering glitch.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - typed_text_on_new_line: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

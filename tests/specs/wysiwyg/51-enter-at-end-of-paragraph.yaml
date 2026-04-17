@@ -1,0 +1,18 @@
+name: "Enter at end of paragraph — new empty paragraph below, cursor on it"
+scenario: "51-enter-at-end-of-paragraph"
+editor: wysiwyg
+tags: [enter, paragraph, newline]
+description: >
+  Pressing Enter at the end of a paragraph should create a new empty
+  paragraph below with the cursor positioned on the new line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_line_created_below: true
+    - cursor_on_new_line: true
+    - no_raw_markdown_markers: true

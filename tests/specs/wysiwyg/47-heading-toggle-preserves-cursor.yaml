@@ -1,0 +1,21 @@
+name: "Toggle H1 to H2 — cursor stays in same text position"
+scenario: "47-heading-toggle-preserves-cursor"
+editor: wysiwyg
+tags: [cursor, headings, toolbar, stability]
+description: >
+  After toggling heading level from H1 to H2 via the toolbar, the cursor
+  should remain in the same text position within the heading.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    headings:
+      h2: "> 0"
+
+  visual:
+    - text_readable: true
+    - cursor_visible_in_screenshot: true
+    - cursor_at_expected_position: true
+    - no_raw_markdown_markers: true

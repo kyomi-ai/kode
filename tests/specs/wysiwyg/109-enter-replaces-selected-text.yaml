@@ -1,0 +1,18 @@
+name: "Select text within a paragraph and press Enter — selection replaced with line break"
+scenario: "109-enter-replaces-selected-text"
+editor: wysiwyg
+tags: [enter, selection, replace, newline]
+description: >
+  Selecting text within a paragraph and pressing Enter should replace the
+  selected text with a line break, splitting the paragraph.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - selected_text_replaced: true
+    - paragraph_split: true
+    - no_raw_markdown_markers: true

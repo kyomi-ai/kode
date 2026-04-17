@@ -1,0 +1,37 @@
+# Build artifacts
+target/
+dist/
+pkg/
+demo/dist/
+spike/pkg/
+
+# Node / Playwright
+node_modules/
+tests/node_modules/
+tests/screenshots/
+test-results/
+demo/test-results/
+playwright-report/
+
+# Local dev tooling (private workflows, not shipped)
+.claude/
+.githooks/
+scripts/
+CLAUDE.md
+.review-approval
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets (belt-and-braces — none should ever be in the tree)
+*.pem
+*.key
+*.pfx
+.env
+.env.*
+!.env.example

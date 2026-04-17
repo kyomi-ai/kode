@@ -1,0 +1,17 @@
+name: "Click into WYSIWYG content — cursor visible"
+scenario: "06-cursor-in-text"
+editor: wysiwyg
+tags: [cursor, interaction]
+description: >
+  After clicking into the WYSIWYG content area, a blinking cursor should be
+  visible at the click position.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - cursor_visible_in_screenshot: true
+    - no_blank_editor: true

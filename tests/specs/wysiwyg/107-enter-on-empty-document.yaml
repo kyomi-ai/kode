@@ -1,0 +1,17 @@
+name: "Enter on completely empty document — should create a paragraph"
+scenario: "107-enter-on-empty-document"
+editor: wysiwyg
+tags: [enter, empty, edge-case, newline]
+description: >
+  Pressing Enter on a completely empty document should create a paragraph
+  that accepts typed content without errors.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - typed_text_visible: true
+    - no_visual_artifacts: true

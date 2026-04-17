@@ -1,0 +1,18 @@
+name: "Delete at end of last list item — should merge next block into list or create junction"
+scenario: "91-delete-at-end-of-last-list-item"
+editor: wysiwyg
+tags: [delete, lists, merge, adversarial]
+description: >
+  Pressing Delete at the end of the last list item should merge the next
+  block's content into the list item or create a proper junction.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_merged_correctly: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

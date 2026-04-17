@@ -1,0 +1,20 @@
+name: "Enter inside **bold *and italic* text** — nested formatting preserved on both lines"
+scenario: "94-enter-inside-nested-bold-and-italic"
+editor: wysiwyg
+tags: [enter, bold, italic, nested, formatting, adversarial, newline]
+description: >
+  Pressing Enter inside nested bold+italic text should preserve the correct
+  formatting hierarchy on both resulting lines.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - nested_formatting_preserved: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

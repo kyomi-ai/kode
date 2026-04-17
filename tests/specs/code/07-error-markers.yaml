@@ -1,0 +1,20 @@
+name: "Error markers (squiggly underlines) set via API"
+scenario: "07-error-markers"
+editor: code
+tags: [error-markers, diagnostics]
+description: >
+  After setting error markers via the API, squiggly underlines should be
+  visible beneath the marked text. Markers should not obscure the text.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      errorMarkers: "> 0"
+
+  visual:
+    - text_readable: true
+    - error_underlines_visible: true
+    - no_blank_editor: true

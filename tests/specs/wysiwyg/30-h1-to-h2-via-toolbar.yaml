@@ -1,0 +1,21 @@
+name: "Click H2 while on H1 — heading level changes, content preserved"
+scenario: "30-h1-to-h2-via-toolbar"
+editor: wysiwyg
+tags: [toolbar, headings, conversion]
+description: >
+  Clicking the H2 toolbar button while on an H1 heading should change the
+  heading level to H2, with smaller size but preserved text content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    headings:
+      h2: "> 0"
+
+  visual:
+    - text_readable: true
+    - heading_size_changed: true
+    - content_text_preserved: true
+    - no_raw_markdown_markers: true

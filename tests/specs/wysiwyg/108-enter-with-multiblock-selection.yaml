@@ -1,0 +1,18 @@
+name: "Select across heading + paragraph + list, press Enter — replaces all with newline"
+scenario: "108-enter-with-multiblock-selection"
+editor: wysiwyg
+tags: [enter, selection, multiblock, adversarial, newline]
+description: >
+  Selecting across multiple block types (heading, paragraph, list) and pressing
+  Enter should replace the entire selection with a line break.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - selection_replaced: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

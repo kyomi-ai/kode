@@ -1,0 +1,17 @@
+name: "Cursor at end of paragraph — cursor height matches paragraph text"
+scenario: "42-cursor-at-end-of-paragraph"
+editor: wysiwyg
+tags: [cursor, paragraph, sizing]
+description: >
+  The cursor at the end of a paragraph should have a height that matches
+  the paragraph text size.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_height_matches_text: true
+    - no_visual_artifacts: true

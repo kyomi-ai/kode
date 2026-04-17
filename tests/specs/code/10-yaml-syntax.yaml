@@ -1,0 +1,21 @@
+name: "YAML syntax highlighting"
+scenario: "10-yaml-syntax"
+editor: code
+tags: [syntax-highlighting, yaml, language]
+description: >
+  YAML content should render with syntax highlighting distinct from SQL.
+  Keys, values, and comments should have different colors.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      syntaxSpans: "> 0"
+    text_content_contains_yaml: true
+
+  visual:
+    - text_readable: true
+    - syntax_colors_distinct: true
+    - no_blank_editor: true

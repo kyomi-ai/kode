@@ -1,0 +1,18 @@
+name: "Multiple blank lines then Backspace repeatedly — lines removed one by one"
+scenario: "92-backspace-through-multiple-blank-lines"
+editor: wysiwyg
+tags: [backspace, blank-line, adversarial]
+description: >
+  After creating multiple blank lines, pressing Backspace repeatedly should
+  remove them one by one without collapsing or corruption.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - blank_lines_reduced: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

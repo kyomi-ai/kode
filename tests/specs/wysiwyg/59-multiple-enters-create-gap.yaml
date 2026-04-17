@@ -1,0 +1,18 @@
+name: "Multiple Enter presses — visible gap between paragraphs"
+scenario: "59-multiple-enters-create-gap"
+editor: wysiwyg
+tags: [enter, paragraph, spacing, newline]
+description: >
+  Pressing Enter multiple times and typing text should create distinct
+  paragraphs with visible spacing between them.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - paragraph_spacing_visible: true
+    - multiple_paragraphs_visible: true
+    - no_raw_markdown_markers: true

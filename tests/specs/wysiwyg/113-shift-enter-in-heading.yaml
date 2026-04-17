@@ -1,0 +1,17 @@
+name: "Shift+Enter inside heading — soft break in heading or block conversion?"
+scenario: "113-shift-enter-in-heading"
+editor: wysiwyg
+tags: [shift-enter, headings, soft-break, adversarial, newline]
+description: >
+  Pressing Shift+Enter inside a heading tests whether a soft break is allowed
+  in headings or if it triggers a block-type conversion.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,17 @@
+name: "Select text in WYSIWYG mode"
+scenario: "07-text-selection"
+editor: wysiwyg
+tags: [selection, interaction]
+description: >
+  After shift-clicking to select text, a selection highlight should be visible
+  and the selected text should remain readable through the highlight.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - selection_highlight_visible: true
+    - text_readable_through_selection: true

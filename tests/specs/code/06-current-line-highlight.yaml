@@ -1,0 +1,22 @@
+name: "Cursor on a line — current line background highlight visible"
+scenario: "06-current-line-highlight"
+editor: code
+tags: [highlight, current-line]
+description: >
+  When the cursor is on a line, that line should have a subtle background
+  highlight. The background must be semi-transparent so text remains readable.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      currentLineHighlight: "> 0"
+    layering:
+      currentLineBackgrounds: "rgba_with_alpha_lt_1"
+
+  visual:
+    - text_readable: true
+    - current_line_highlighted: true
+    - highlight_is_subtle: true

@@ -1,0 +1,31 @@
+name: "Editor with default SQL content, no interaction"
+scenario: "01-initial-load"
+editor: code
+tags: [rendering, syntax-highlighting, baseline]
+description: >
+  Verifies that the code editor renders SQL content with syntax highlighting,
+  line numbers, and correct DOM structure on initial load without any user interaction.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      overlay: true
+      gutter: true
+    counts:
+      syntaxSpans: "> 0"
+      lineNumbers: "> 0"
+    layering:
+      overlay_position: absolute
+      overlay_pointer_events: none
+      content_position: relative
+    cursor_visible: false
+    text_content_contains: "SELECT"
+
+  visual:
+    - text_readable: true
+    - syntax_colors_distinct: true
+    - no_blank_editor: true
+    - no_overflow: true
+    - line_numbers_visible: true

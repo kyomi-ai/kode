@@ -1,0 +1,18 @@
+name: "Three consecutive Enters — all blank lines render, not collapsed to one"
+scenario: "79-triple-blank-lines-not-collapsed"
+editor: wysiwyg
+tags: [enter, blank-line, spacing, adversarial, newline]
+description: >
+  Three consecutive Enter presses should produce multiple blank lines that
+  are all rendered, not collapsed down to a single blank line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - multiple_blank_lines_visible: true
+    - lines_not_collapsed: true
+    - no_raw_markdown_markers: true

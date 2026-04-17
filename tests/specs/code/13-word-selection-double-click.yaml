@@ -1,0 +1,22 @@
+name: "Double-click selects a word — word highlight visible"
+scenario: "13-word-selection-double-click"
+editor: code
+tags: [selection, double-click, word]
+description: >
+  After double-clicking on a word, only that word should be selected. The
+  selection should be word-sized, not a full line selection.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      selectionHighlights: "> 0"
+    layering:
+      selection_is_word_sized: true
+
+  visual:
+    - text_readable: true
+    - selection_highlight_visible: true
+    - selection_covers_single_word: true

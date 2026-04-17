@@ -1,0 +1,14 @@
+[package]
+name = "kode-spike"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+editor-core = "0.3"
+arborium = { version = "2.16", default-features = false, features = ["lang-sql", "lang-yaml", "lang-markdown"] }
+wasm-bindgen = "0.2"

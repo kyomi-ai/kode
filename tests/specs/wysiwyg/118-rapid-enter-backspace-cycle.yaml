@@ -1,0 +1,18 @@
+name: "Enter then Backspace 10 times rapidly — no corruption, content intact"
+scenario: "118-rapid-enter-backspace-cycle"
+editor: wysiwyg
+tags: [enter, backspace, rapid, stress, adversarial]
+description: >
+  Pressing Enter then Backspace 10 times rapidly should leave the content
+  intact with no corruption, missing text, or visual artifacts.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_intact: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,18 @@
+name: "Enter key splits current paragraph into two"
+scenario: "27-enter-splits-paragraph"
+editor: wysiwyg
+tags: [enter, paragraph, newline]
+description: >
+  Pressing Enter in the middle of a paragraph should split it into two
+  separate paragraphs with visible spacing between them.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - two_paragraphs_visible: true
+    - paragraph_spacing_visible: true
+    - no_raw_markdown_markers: true

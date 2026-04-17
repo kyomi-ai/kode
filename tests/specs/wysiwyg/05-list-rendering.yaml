@@ -1,0 +1,20 @@
+name: "Bullet and ordered list rendering"
+scenario: "05-list-rendering"
+editor: wysiwyg
+tags: [lists, rendering]
+description: >
+  Bullet lists (ul) and ordered lists (ol) should render with proper
+  indentation and visible markers (bullets or numbers).
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - list_markers_visible: true
+    - list_items_indented: true
+    - no_raw_markdown_markers: true

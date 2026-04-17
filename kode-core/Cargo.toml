@@ -1,0 +1,11 @@
+[package]
+name = "kode-core"
+version = "0.2.0-alpha.1"
+edition = "2021"
+description = "A fast, framework-agnostic text editor core built on ropey"
+license = "MIT"
+
+[dependencies]
+ropey = "1"
+
+[dev-dependencies]

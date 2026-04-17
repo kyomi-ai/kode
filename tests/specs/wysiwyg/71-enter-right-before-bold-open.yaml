@@ -1,0 +1,19 @@
+name: "Enter right before ** opening marker — bold should stay intact on new line"
+scenario: "71-enter-right-before-bold-open"
+editor: wysiwyg
+tags: [enter, bold, formatting-boundary, adversarial, newline]
+description: >
+  Pressing Enter right before the opening ** marker of bold text should split
+  the line with the bold text moving intact to the new line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_text_intact_on_new_line: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

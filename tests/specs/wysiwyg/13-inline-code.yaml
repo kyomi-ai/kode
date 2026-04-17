@@ -1,0 +1,19 @@
+name: "Inline code renders with background highlight"
+scenario: "13-inline-code"
+editor: wysiwyg
+tags: [inline-code, rendering]
+description: >
+  Inline code spans should render with a distinct background color and
+  monospace font, distinguishable from surrounding text.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - inline_code_has_background: true
+    - inline_code_uses_monospace: true
+    - no_raw_markdown_markers: true

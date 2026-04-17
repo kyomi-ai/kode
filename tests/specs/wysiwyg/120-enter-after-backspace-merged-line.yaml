@@ -1,0 +1,18 @@
+name: "Merge two paragraphs with Backspace, then Enter at merge point — re-split works"
+scenario: "120-enter-after-backspace-merged-line"
+editor: wysiwyg
+tags: [enter, backspace, merge, re-split, adversarial, newline]
+description: >
+  After merging two paragraphs with Backspace and then pressing Enter at the
+  merge point, the content should re-split correctly into two paragraphs.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_re_split_correctly: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

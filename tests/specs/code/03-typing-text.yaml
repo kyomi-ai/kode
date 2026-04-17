@@ -1,0 +1,24 @@
+name: "Type new text — verify text visible on current line"
+scenario: "03-typing-text"
+editor: code
+tags: [typing, cursor, content]
+description: >
+  After typing new text into the editor, the typed text must be visible and
+  not hidden behind any highlight or overlay. Cursor should remain visible.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      cursor: true
+    text_content_contains: "newly typed text"
+    layering:
+      cursorVisible: true
+    cursor_visible: true
+
+  visual:
+    - text_readable: true
+    - typed_text_visible: true
+    - cursor_visible_in_screenshot: true
+    - no_blank_editor: true

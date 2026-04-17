@@ -1,0 +1,20 @@
+name: "Enter inside ***bold italic*** — triple markers split correctly"
+scenario: "93-enter-inside-bold-italic-triple"
+editor: wysiwyg
+tags: [enter, bold, italic, combined, formatting, adversarial, newline]
+description: >
+  Pressing Enter inside ***bold italic*** text should split the paragraph
+  while preserving both bold and italic formatting on both lines.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_italic_preserved_on_both_lines: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

@@ -1,0 +1,19 @@
+name: "Click code block toolbar button — fenced code block inserted"
+scenario: "37-insert-code-block-via-toolbar"
+editor: wysiwyg
+tags: [toolbar, code-block, formatting]
+description: >
+  Clicking the Code Block toolbar button should insert a fenced code block
+  at the cursor position with a distinct background.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - code_block_has_distinct_background: true
+    - no_raw_markdown_markers: true

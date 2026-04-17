@@ -1,0 +1,12 @@
+[package]
+name = "kode-doc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arborium-tree-sitter = "2.16"
+arborium-markdown = "2.16"
+smallvec = "1"
+
+[lints]
+workspace = true

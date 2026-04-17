@@ -1,0 +1,18 @@
+name: "Enter inside ~~strikethrough~~ — markers closed/reopened"
+scenario: "62-enter-inside-strikethrough"
+editor: wysiwyg
+tags: [enter, strikethrough, formatting, newline, adversarial]
+description: >
+  Pressing Enter inside strikethrough text should split the paragraph and
+  preserve strikethrough formatting on both resulting lines.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_raw_markdown_markers: true
+    - strikethrough_preserved_on_both_lines: true
+    - no_visual_artifacts: true

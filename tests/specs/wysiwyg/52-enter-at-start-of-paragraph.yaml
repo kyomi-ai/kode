@@ -1,0 +1,18 @@
+name: "Enter at start of paragraph — blank line above, content stays"
+scenario: "52-enter-at-start-of-paragraph"
+editor: wysiwyg
+tags: [enter, paragraph, newline]
+description: >
+  Pressing Enter at the start of a paragraph should insert a blank line
+  above, pushing the content down while preserving it.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - blank_line_above_content: true
+    - content_preserved: true
+    - no_raw_markdown_markers: true

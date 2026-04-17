@@ -1,0 +1,17 @@
+name: "Cursor at start of paragraph after heading — correct position"
+scenario: "45-cursor-between-blocks"
+editor: wysiwyg
+tags: [cursor, positioning, blocks]
+description: >
+  The cursor at the start of a paragraph that follows a heading should be
+  positioned correctly at the paragraph level, not overlapping the heading.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_at_correct_vertical_position: true
+    - no_visual_artifacts: true

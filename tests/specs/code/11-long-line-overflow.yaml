@@ -1,0 +1,21 @@
+name: "Long line that exceeds editor width — no horizontal overflow visible"
+scenario: "11-long-line-overflow"
+editor: code
+tags: [overflow, layout, long-line]
+description: >
+  A long line that exceeds the editor width should not cause a horizontal
+  scrollbar to appear or content to overflow outside the editor bounds.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      scrollContainer: true
+    styles:
+      scrollContainer_overflow: "hidden or auto"
+
+  visual:
+    - no_horizontal_scrollbar: true
+    - no_overflow: true
+    - text_readable: true

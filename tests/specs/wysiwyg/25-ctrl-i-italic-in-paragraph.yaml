@@ -1,0 +1,18 @@
+name: "Ctrl+I toggles italic on selected text in paragraph"
+scenario: "25-ctrl-i-italic-in-paragraph"
+editor: wysiwyg
+tags: [keyboard, italic, formatting]
+description: >
+  After selecting text and pressing Ctrl+I, the selected text should become
+  italic with no raw * markers visible.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - italic_text_visually_slanted: true
+    - no_raw_markdown_markers: true

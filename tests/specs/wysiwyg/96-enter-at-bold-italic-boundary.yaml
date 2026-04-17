@@ -1,0 +1,19 @@
+name: "Enter at boundary between **bold** and *italic* — formatting preserved on each side"
+scenario: "96-enter-at-bold-italic-boundary"
+editor: wysiwyg
+tags: [enter, bold, italic, boundary, adversarial, newline]
+description: >
+  Pressing Enter at the boundary between bold and italic text should preserve
+  bold on the first line and italic on the second line (or vice versa).
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - bold_on_correct_line: true
+    - italic_on_correct_line: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

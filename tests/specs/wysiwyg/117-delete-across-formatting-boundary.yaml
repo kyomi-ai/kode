@@ -1,0 +1,19 @@
+name: "Delete at end of normal text that precedes bold — bold formatting preserved"
+scenario: "117-delete-across-formatting-boundary"
+editor: wysiwyg
+tags: [delete, bold, formatting-boundary, adversarial]
+description: >
+  Pressing Delete at the end of normal text right before bold text should
+  merge content while preserving the bold formatting.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_formatting_preserved: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

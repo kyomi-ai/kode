@@ -1,0 +1,17 @@
+name: "Enter at absolute end of document — new content appears at bottom"
+scenario: "102-enter-at-very-end-of-document"
+editor: wysiwyg
+tags: [enter, end-of-document, newline]
+description: >
+  Pressing Enter at the absolute end of the document should create a new
+  paragraph at the bottom that accepts typed content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_content_at_bottom: true
+    - no_visual_artifacts: true

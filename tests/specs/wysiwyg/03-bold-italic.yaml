@@ -1,0 +1,20 @@
+name: "Bold and italic text rendering"
+scenario: "03-bold-italic"
+editor: wysiwyg
+tags: [formatting, bold, italic]
+description: >
+  After typing bold (Ctrl+B) and italic (Ctrl+I) text, the formatting should
+  be visually rendered without raw markdown markers.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_text_visually_heavier: true
+    - italic_text_visually_slanted: true
+    - no_raw_markdown_markers: true

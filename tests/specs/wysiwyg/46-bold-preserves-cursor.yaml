@@ -1,0 +1,19 @@
+name: "Apply bold via Ctrl+B — cursor stays at same logical position"
+scenario: "46-bold-preserves-cursor"
+editor: wysiwyg
+tags: [cursor, bold, formatting, stability]
+description: >
+  After selecting text and applying bold with Ctrl+B, the cursor/selection
+  should remain at the same logical position, not jump elsewhere.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - cursor_visible_in_screenshot: true
+    - cursor_at_expected_position: true
+    - no_raw_markdown_markers: true

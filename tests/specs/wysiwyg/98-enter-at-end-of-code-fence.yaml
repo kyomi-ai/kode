@@ -1,0 +1,18 @@
+name: "Enter after closing ``` fence — should exit code block, create paragraph"
+scenario: "98-enter-at-end-of-code-fence"
+editor: wysiwyg
+tags: [enter, code-block, exit, newline]
+description: >
+  Pressing Enter after the closing fence of a code block should exit the
+  code block and create a new paragraph below it.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_paragraph_below_code_block: true
+    - code_block_intact: true
+    - no_raw_markdown_markers: true

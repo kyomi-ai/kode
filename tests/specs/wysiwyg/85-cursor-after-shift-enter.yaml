@@ -1,0 +1,18 @@
+name: "Shift+Enter — cursor on new soft-break line, type to verify position"
+scenario: "85-cursor-after-shift-enter"
+editor: wysiwyg
+tags: [shift-enter, cursor, positioning, soft-break, newline]
+description: >
+  After pressing Shift+Enter and typing, the typed text should appear on the
+  new soft-break line, confirming cursor moved correctly.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - typed_text_on_soft_break_line: true
+    - cursor_visible_in_screenshot: true
+    - no_raw_markdown_markers: true

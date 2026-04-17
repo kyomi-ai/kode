@@ -1,0 +1,18 @@
+name: "Select across multiple blocks and delete — content merges correctly"
+scenario: "29-multiline-selection-delete"
+editor: wysiwyg
+tags: [selection, delete, merge]
+description: >
+  Selecting across heading and paragraph blocks then pressing Backspace should
+  delete the selection and merge remaining content correctly.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_merged_after_delete: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

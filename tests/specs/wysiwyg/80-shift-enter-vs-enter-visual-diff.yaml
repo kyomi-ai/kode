@@ -1,0 +1,18 @@
+name: "Shift+Enter then Enter — soft break is tighter spacing than hard break"
+scenario: "80-shift-enter-vs-enter-visual-diff"
+editor: wysiwyg
+tags: [shift-enter, enter, spacing, visual-comparison, newline]
+description: >
+  A soft break (Shift+Enter) should produce visually tighter spacing than
+  a hard break (Enter). Both should be visible but distinguishable.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - soft_break_tighter_than_hard_break: true
+    - both_breaks_visible: true
+    - no_raw_markdown_markers: true

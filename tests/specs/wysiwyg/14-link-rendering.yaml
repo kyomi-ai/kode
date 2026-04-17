@@ -1,0 +1,17 @@
+name: "Links render as clickable styled text"
+scenario: "14-link-rendering"
+editor: wysiwyg
+tags: [links, rendering]
+description: >
+  Links should render as styled text (typically colored and/or underlined),
+  not as raw markdown [text](url) syntax.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - links_styled_distinctly: true
+    - no_raw_markdown_markers: true

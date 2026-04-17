@@ -1,0 +1,17 @@
+name: "Cursor at end of H2 heading — cursor height matches H2 size"
+scenario: "43-cursor-at-end-of-h2"
+editor: wysiwyg
+tags: [cursor, headings, sizing]
+description: >
+  The cursor at the end of an H2 heading should have a height proportional
+  to the H2 font size, smaller than H1 but larger than paragraph text.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_height_matches_h2: true
+    - no_visual_artifacts: true

@@ -1,0 +1,17 @@
+name: "Enter in WYSIWYG, switch to Source — newline visible in markdown source"
+scenario: "82-enter-renders-in-source-roundtrip"
+editor: wysiwyg
+tags: [enter, source-mode, roundtrip, newline]
+description: >
+  After pressing Enter in WYSIWYG mode and switching to Source mode, the
+  newline should be visible in the raw markdown as a paragraph break.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+
+  visual:
+    - text_readable: true
+    - newline_visible_in_source: true
+    - source_mode_active: true

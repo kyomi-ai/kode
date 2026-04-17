@@ -1,0 +1,19 @@
+name: "Enter inside italic text — no raw * markers visible after split"
+scenario: "60-enter-preserves-no-raw-markers"
+editor: wysiwyg
+tags: [enter, italic, formatting, newline, adversarial]
+description: >
+  Pressing Enter inside italic text should split the paragraph while
+  preserving italic formatting on both sides. No raw * markers should
+  be visible in the rendered output.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_raw_markdown_markers: true
+    - italic_preserved_on_both_lines: true
+    - no_visual_artifacts: true

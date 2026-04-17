@@ -1,0 +1,20 @@
+name: "Ctrl+A to select all — full selection highlight"
+scenario: "05-select-all"
+editor: code
+tags: [selection, highlight, keyboard]
+description: >
+  After pressing Ctrl+A, the entire editor content should be selected with
+  selection highlights covering all visible content.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      selectionHighlights: "> 0"
+
+  visual:
+    - text_readable: true
+    - selection_covers_all_content: true
+    - text_readable_through_selection: true

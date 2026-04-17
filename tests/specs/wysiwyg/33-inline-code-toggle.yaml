@@ -1,0 +1,19 @@
+name: "Select text and toggle inline code via toolbar backtick button"
+scenario: "33-inline-code-toggle"
+editor: wysiwyg
+tags: [toolbar, inline-code, formatting]
+description: >
+  After selecting text and clicking the Inline Code toolbar button, the
+  selected text should render with inline code styling (background, monospace).
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - inline_code_has_background: true
+    - no_raw_markdown_markers: true

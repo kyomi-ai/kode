@@ -1,0 +1,18 @@
+name: "Enter inside `inline code` — markers closed/reopened correctly"
+scenario: "61-enter-inside-inline-code"
+editor: wysiwyg
+tags: [enter, inline-code, formatting, newline, adversarial]
+description: >
+  Pressing Enter inside an inline code span should split the paragraph and
+  close/reopen the inline code markers correctly on each line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_raw_markdown_markers: true
+    - inline_code_styling_preserved: true
+    - no_visual_artifacts: true

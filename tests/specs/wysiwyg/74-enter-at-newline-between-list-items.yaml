@@ -1,0 +1,20 @@
+name: "Position cursor at boundary between two list items and press Enter"
+scenario: "74-enter-at-newline-between-list-items"
+editor: wysiwyg
+tags: [enter, lists, boundary, adversarial, newline]
+description: >
+  Pressing Enter at the boundary between two list items should insert a new
+  list item between them without corrupting the list structure.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - list_structure_intact: true
+    - new_item_inserted: true
+    - no_raw_markdown_markers: true

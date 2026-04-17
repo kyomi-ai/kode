@@ -1,0 +1,19 @@
+name: "Code block rendering within WYSIWYG"
+scenario: "04-code-block"
+editor: wysiwyg
+tags: [code-block, rendering]
+description: >
+  Code blocks in the WYSIWYG editor should render with a distinct background,
+  monospace font, and proper containment.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - code_block_has_distinct_background: true
+    - code_block_uses_monospace_font: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,22 @@
+name: "Scrolled position in a large file — line numbers and content aligned"
+scenario: "12-scroll-large-file"
+editor: code
+tags: [scroll, large-file, alignment]
+description: >
+  After scrolling in a large file, line numbers and content should remain
+  aligned. No blank areas or misaligned gutters.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      gutter: true
+    counts:
+      lineNumbers: "> 0"
+
+  visual:
+    - text_readable: true
+    - line_numbers_aligned: true
+    - content_and_gutter_aligned: true
+    - no_blank_areas: true

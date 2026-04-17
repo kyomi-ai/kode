@@ -1,0 +1,25 @@
+name: "Click into editor, cursor visible on a line with text"
+scenario: "02-cursor-on-line"
+editor: code
+tags: [cursor, interaction]
+description: >
+  After clicking into the editor, the cursor should be visible with non-zero
+  dimensions and a color that matches the theme cursor variable.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      cursor: true
+    layering:
+      cursorVisible: true
+      cursorWidth: "> 0px"
+      cursorHeight: "> 0px"
+      cursorBackground: "matches_theme_cursor"
+    cursor_visible: true
+
+  visual:
+    - text_readable: true
+    - cursor_visible_in_screenshot: true
+    - no_blank_editor: true

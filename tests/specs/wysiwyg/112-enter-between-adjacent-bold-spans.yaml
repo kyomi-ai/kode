@@ -1,0 +1,19 @@
+name: "Enter between two adjacent bold spans — **a****b** split correctly"
+scenario: "112-enter-between-adjacent-bold-spans"
+editor: wysiwyg
+tags: [enter, bold, adjacent, adversarial, newline]
+description: >
+  Pressing Enter between two adjacent bold spans should split them correctly
+  with each bold span on its own line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_spans_split_correctly: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

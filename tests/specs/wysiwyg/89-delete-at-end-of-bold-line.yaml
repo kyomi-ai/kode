@@ -1,0 +1,19 @@
+name: "Delete at end of bold text — merges with next line, bold survives"
+scenario: "89-delete-at-end-of-bold-line"
+editor: wysiwyg
+tags: [delete, bold, merge, formatting, adversarial]
+description: >
+  Pressing Delete at the end of bold text should merge with the next line
+  while preserving the bold formatting.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_formatting_preserved: true
+    - lines_merged: true
+    - no_raw_markdown_markers: true

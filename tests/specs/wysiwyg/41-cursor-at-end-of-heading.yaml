@@ -1,0 +1,17 @@
+name: "Cursor at end of H1 heading — cursor height matches heading font size"
+scenario: "41-cursor-at-end-of-heading"
+editor: wysiwyg
+tags: [cursor, headings, sizing]
+description: >
+  The cursor at the end of an H1 heading should have a height that matches
+  the heading font size, not the default paragraph text size.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_height_matches_heading: true
+    - no_visual_artifacts: true

@@ -1,0 +1,23 @@
+name: "Click bullet list button while cursor is on a heading — heading prefix stripped, content preserved"
+scenario: "21-heading-to-bullet-via-toolbar"
+editor: wysiwyg
+tags: [toolbar, lists, headings, conversion]
+description: >
+  Clicking the bullet list toolbar button while the cursor is on a heading
+  should convert the heading to a bullet list item, stripping the heading
+  prefix while preserving the text content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - list_marker_visible: true
+    - content_text_preserved: true
+    - no_heading_style_on_converted_item: true
+    - no_raw_markdown_markers: true

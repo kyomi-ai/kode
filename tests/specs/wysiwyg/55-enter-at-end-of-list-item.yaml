@@ -1,0 +1,20 @@
+name: "Enter at end of list item — new list item below"
+scenario: "55-enter-at-end-of-list-item"
+editor: wysiwyg
+tags: [enter, lists, newline]
+description: >
+  Pressing Enter at the end of a list item should create a new list item
+  below with a bullet marker, continuing the list.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - new_list_item_created: true
+    - list_marker_on_new_item: true
+    - no_raw_markdown_markers: true

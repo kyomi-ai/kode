@@ -1,0 +1,18 @@
+name: "Enter on empty list item — exits list, creates paragraph"
+scenario: "57-enter-in-empty-list-item"
+editor: wysiwyg
+tags: [enter, lists, exit-list, newline]
+description: >
+  Pressing Enter on an empty list item should exit the list and create a
+  new paragraph, not continue adding empty list items.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - list_exited: true
+    - cursor_on_paragraph: true
+    - no_raw_markdown_markers: true

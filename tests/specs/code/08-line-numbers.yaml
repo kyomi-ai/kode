@@ -1,0 +1,21 @@
+name: "Verify line number gutter renders correctly"
+scenario: "08-line-numbers"
+editor: code
+tags: [line-numbers, gutter]
+description: >
+  With a file of 100+ lines, the gutter should display 3-digit line numbers.
+  Line numbers must be aligned and the gutter must be present.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      gutter: true
+    counts:
+      lineNumbers: ">= 100"
+
+  visual:
+    - text_readable: true
+    - line_numbers_visible: true
+    - line_numbers_aligned: true
+    - gutter_distinct_from_content: true

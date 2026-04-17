@@ -1,0 +1,20 @@
+name: "Enter at end of ordered list item — new numbered item"
+scenario: "66-enter-in-ordered-list-item"
+editor: wysiwyg
+tags: [enter, lists, ordered-list, newline]
+description: >
+  Pressing Enter at the end of an ordered list item should create a new
+  numbered list item below, continuing the numbering.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ol: "> 0"
+
+  visual:
+    - text_readable: true
+    - new_numbered_item_created: true
+    - numbering_continues: true
+    - no_raw_markdown_markers: true

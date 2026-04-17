@@ -1,0 +1,18 @@
+name: "Click after code block and type — new paragraph below code block"
+scenario: "32-type-after-code-block"
+editor: wysiwyg
+tags: [code-block, typing, paragraph]
+description: >
+  After clicking past the last content and typing, a new paragraph should
+  appear below the code block, not inside it.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - typed_text_visible: true
+    - typed_text_outside_code_block: true
+    - no_raw_markdown_markers: true

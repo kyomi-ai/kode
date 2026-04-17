@@ -1,0 +1,509 @@
+/* ── Toolbar ───────────────────────────────────────────────────────── */
+
+.kode-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--kode-toolbar-gap, 2px);
+    padding: var(--kode-toolbar-padding, 6px 8px);
+    background: var(--kode-toolbar-bg, var(--kode-bg));
+    border-bottom: var(--kode-toolbar-border-width, 1px) solid var(--kode-toolbar-border-color, var(--kode-border));
+    font-family: var(--kode-toolbar-font-family, var(--kode-font-family, 'JetBrains Mono', 'Fira Code', monospace));
+    font-size: var(--kode-toolbar-font-size, 13px);
+    user-select: none;
+    flex-wrap: var(--kode-toolbar-wrap, wrap);
+    overflow-x: auto; /* enables scroll when --kode-toolbar-wrap is nowrap */
+    scrollbar-color: var(--kode-toolbar-scrollbar-color, auto);
+}
+
+.kode-toolbar-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--kode-toolbar-button-gap, 0);
+    min-width: var(--kode-toolbar-button-min-width, 28px);
+    height: var(--kode-toolbar-button-height, 28px);
+    padding: var(--kode-toolbar-button-padding, 0 6px);
+    background: transparent;
+    color: var(--kode-fg);
+    border: var(--kode-toolbar-button-border, 1px solid transparent);
+    border-radius: var(--kode-toolbar-button-border-radius, 4px);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: var(--kode-toolbar-button-font-size, 13px);
+    font-weight: var(--kode-toolbar-button-font-weight, 500);
+    transition: all var(--kode-transition-duration, 0.15s) ease;
+}
+
+.kode-toolbar-button:hover {
+    background: var(--kode-toolbar-button-hover-bg, var(--kode-bg-hover));
+    color: var(--kode-toolbar-button-hover-color, var(--kode-fg-bright));
+    border-color: var(--kode-toolbar-button-hover-border, var(--kode-accent));
+}
+
+.kode-toolbar-button:active {
+    background: var(--kode-toolbar-button-active-bg, var(--kode-bg-highlight));
+    color: var(--kode-toolbar-button-active-color, var(--kode-accent));
+    border-color: var(--kode-toolbar-button-active-border, var(--kode-accent));
+}
+
+.kode-toolbar-button.active {
+    background: var(--kode-toolbar-button-selected-bg, var(--kode-accent));
+    color: var(--kode-toolbar-button-selected-color, var(--kode-bg));
+    border-color: var(--kode-toolbar-button-selected-border, var(--kode-accent));
+}
+
+.kode-toolbar-button.active:hover {
+    background: var(--kode-toolbar-button-selected-bg, var(--kode-accent));
+    color: var(--kode-toolbar-button-selected-color, var(--kode-bg));
+    border-color: var(--kode-toolbar-button-selected-border, var(--kode-accent));
+}
+
+.kode-toolbar-separator {
+    width: var(--kode-toolbar-separator-width, 1px);
+    height: var(--kode-toolbar-separator-height, 20px);
+    background: var(--kode-toolbar-separator-color, var(--kode-border));
+    margin: var(--kode-toolbar-separator-margin, 0 4px);
+    flex-shrink: 0;
+}
+
+.kode-toolbar-spacer {
+    flex: 1;
+}
+
+/* ── WYSIWYG Block Renderer Styles ─────────────────────────────────── */
+
+/* Container */
+.wysiwyg-container {
+    font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif);
+    font-size: var(--kode-content-font-size, inherit);
+    color: var(--kode-fg-bright);
+    background: var(--kode-bg);
+    line-height: var(--kode-content-line-height, 1.7);
+    padding: var(--kode-container-padding, 0);
+    max-width: var(--kode-content-max-width, 800px);
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    cursor: text;
+}
+
+/* Hidden textarea — stays on-screen so browsers allow focus */
+.wysiwyg-container .kode-hidden-textarea {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0.01;
+    padding: 0;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    z-index: -1;
+}
+
+/* ── Headings ──────────────────────────────────────────────────────── */
+
+.wysiwyg-heading {
+    color: var(--kode-heading-color, var(--kode-fg-bright));
+    font-family: var(--kode-heading-font-family, inherit);
+    font-weight: var(--kode-heading-font-weight, 700);
+    margin-top: var(--kode-heading-margin-top, 1.5em);
+    margin-bottom: var(--kode-heading-margin-bottom, 0.5em);
+    line-height: var(--kode-heading-line-height, 1.3);
+    letter-spacing: var(--kode-heading-letter-spacing, normal);
+}
+
+.wysiwyg-heading:first-child {
+    margin-top: 0;
+}
+
+/* Italic emphasis inside a heading — for editorial themes that want
+ * a spot color (e.g. brand accent) on emphasized words inside titles.
+ * Targets both `<em>` elements (how the tree renderer emits markdown
+ * `*italic*` syntax) and `.wysiwyg-italic` spans (used by some editing
+ * modes that wrap formatted runs in a class rather than a semantic tag). */
+.wysiwyg-heading em,
+.wysiwyg-heading .wysiwyg-italic {
+    color: var(--kode-heading-emphasis-color, inherit);
+}
+
+.wysiwyg-h1 {
+    font-size: var(--kode-h1-font-size, 2em);
+    font-weight: var(--kode-h1-font-weight, var(--kode-heading-font-weight, 700));
+    margin-top: var(--kode-h1-margin-top, var(--kode-heading-margin-top, 1.5em));
+    margin-bottom: var(--kode-h1-margin-bottom, var(--kode-heading-margin-bottom, 0.5em));
+    border-bottom: var(--kode-h1-border-width, 1px) solid var(--kode-h1-border-color, var(--kode-border));
+    padding-bottom: var(--kode-h1-padding-bottom, 0.3em);
+}
+
+.wysiwyg-h2 {
+    font-size: var(--kode-h2-font-size, 1.5em);
+    font-weight: var(--kode-h2-font-weight, var(--kode-heading-font-weight, 700));
+    margin-top: var(--kode-h2-margin-top, var(--kode-heading-margin-top, 1.5em));
+    margin-bottom: var(--kode-h2-margin-bottom, var(--kode-heading-margin-bottom, 0.5em));
+    border-bottom: var(--kode-h2-border-width, 1px) solid var(--kode-h2-border-color, var(--kode-border));
+    padding-bottom: var(--kode-h2-padding-bottom, 0.2em);
+}
+
+.wysiwyg-h3 {
+    font-size: var(--kode-h3-font-size, 1.25em);
+    font-weight: var(--kode-h3-font-weight, var(--kode-heading-font-weight, 700));
+    margin-top: var(--kode-h3-margin-top, var(--kode-heading-margin-top, 1.5em));
+    margin-bottom: var(--kode-h3-margin-bottom, var(--kode-heading-margin-bottom, 0.5em));
+}
+
+.wysiwyg-h4 {
+    font-size: var(--kode-h4-font-size, 1.1em);
+    font-weight: var(--kode-h4-font-weight, var(--kode-heading-font-weight, 700));
+    font-family: var(--kode-h4-font-family, var(--kode-heading-font-family, inherit));
+    color: var(--kode-h4-color, var(--kode-heading-color, var(--kode-fg-bright)));
+    letter-spacing: var(--kode-h4-letter-spacing, var(--kode-heading-letter-spacing, normal));
+    text-transform: var(--kode-h4-text-transform, none);
+}
+
+.wysiwyg-h5 {
+    font-size: var(--kode-h5-font-size, 1em);
+    font-weight: var(--kode-h5-font-weight, var(--kode-heading-font-weight, 700));
+    font-family: var(--kode-h5-font-family, var(--kode-heading-font-family, inherit));
+    color: var(--kode-h5-color, var(--kode-heading-color, var(--kode-fg-bright)));
+    text-transform: var(--kode-h5-text-transform, none);
+    letter-spacing: var(--kode-h5-letter-spacing, var(--kode-heading-letter-spacing, normal));
+}
+
+.wysiwyg-h6 {
+    font-size: var(--kode-h6-font-size, 0.9em);
+    font-weight: var(--kode-h6-font-weight, var(--kode-heading-font-weight, 700));
+    font-family: var(--kode-h6-font-family, var(--kode-heading-font-family, inherit));
+    color: var(--kode-h6-color, var(--kode-fg-dim));
+    text-transform: var(--kode-h6-text-transform, none);
+    letter-spacing: var(--kode-h6-letter-spacing, var(--kode-heading-letter-spacing, normal));
+}
+
+/* ── Paragraph ─────────────────────────────────────────────────────── */
+
+.wysiwyg-paragraph {
+    margin: var(--kode-paragraph-margin, 0.75em 0);
+    line-height: var(--kode-paragraph-line-height, 1.7);
+}
+
+.wysiwyg-paragraph:first-child {
+    margin-top: 0;
+}
+
+/* ── Lists ─────────────────────────────────────────────────────────── */
+
+.wysiwyg-list {
+    margin: var(--kode-list-margin, 0.5em 0);
+    padding-left: var(--kode-list-padding-left, 1.75em);
+}
+
+.wysiwyg-bullet-list {
+    list-style-type: disc;
+}
+
+.wysiwyg-ordered-list {
+    list-style-type: decimal;
+}
+
+.wysiwyg-list-item {
+    margin: var(--kode-list-item-margin, 0.25em 0);
+    line-height: var(--kode-list-item-line-height, 1.6);
+}
+
+/* Marker color — bullets and numerals. Falls back to inheriting the
+ * text color (browser default) so existing consumers see no change. */
+.wysiwyg-list-item::marker {
+    color: var(--kode-list-marker-color, inherit);
+}
+
+/* Ordered-list marker font — lets consumers render numerals in a
+ * monospaced face for ledger-style tabular alignment while keeping
+ * bullet markers in the inherited font. */
+.wysiwyg-ordered-list > .wysiwyg-list-item::marker {
+    font-family: var(--kode-ol-marker-font-family, inherit);
+    font-variant-numeric: var(--kode-ol-marker-font-variant-numeric, normal);
+    color: var(--kode-ol-marker-color, var(--kode-list-marker-color, inherit));
+}
+
+.wysiwyg-bullet-list > .wysiwyg-list-item::marker {
+    color: var(--kode-ul-marker-color, var(--kode-list-marker-color, inherit));
+}
+
+/* Nested list styling */
+.wysiwyg-list .wysiwyg-list {
+    margin: 0.25em 0;
+}
+
+.wysiwyg-bullet-list .wysiwyg-list {
+    list-style-type: circle;
+}
+
+.wysiwyg-bullet-list .wysiwyg-list .wysiwyg-list {
+    list-style-type: square;
+}
+
+/* ── Blockquote ────────────────────────────────────────────────────── */
+
+.wysiwyg-blockquote {
+    border-left: var(--kode-blockquote-border-width, 4px) solid var(--kode-blockquote-border-color, var(--kode-accent));
+    background: var(--kode-blockquote-background, var(--kode-bg-highlight));
+    margin: var(--kode-blockquote-margin, 0.75em 0);
+    padding: var(--kode-blockquote-padding, 0.5em 1em);
+    color: var(--kode-blockquote-color, var(--kode-fg));
+    font-family: var(--kode-blockquote-font-family, inherit);
+    font-size: var(--kode-blockquote-font-size, inherit);
+    font-style: var(--kode-blockquote-font-style, italic);
+    line-height: var(--kode-blockquote-line-height, inherit);
+    border-radius: var(--kode-blockquote-border-radius, 0 4px 4px 0);
+}
+
+.wysiwyg-blockquote .wysiwyg-blockquote {
+    margin: 0.5em 0;
+}
+
+/* ── Code blocks ───────────────────────────────────────────────────── */
+
+.wysiwyg-code-block {
+    position: relative;
+    margin: var(--kode-code-block-margin, 1em 0);
+    border-radius: var(--kode-code-block-border-radius, 6px);
+    overflow: hidden;
+    background: var(--kode-code-block-wrapper-background, var(--kode-bg-highlight));
+    border: var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border));
+    border-left: var(--kode-code-block-border-left, var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border)));
+}
+
+.wysiwyg-code-block pre {
+    margin: 0;
+    padding: var(--kode-code-block-padding, 1em);
+    background: var(--kode-code-block-background, var(--kode-bg));
+    border: var(--kode-code-block-inner-border-width, 1px) solid var(--kode-code-block-inner-border-color, var(--kode-border));
+    border-radius: var(--kode-code-block-border-radius, 6px);
+    overflow-x: auto;
+    font-size: var(--kode-code-block-font-size, 0.9em);
+    line-height: var(--kode-code-block-line-height, 1.5);
+}
+
+.wysiwyg-code-block code {
+    font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace);
+    white-space: pre;
+}
+
+/* ── Inline code ───────────────────────────────────────────────────── */
+
+.wysiwyg-inline-code {
+    font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace);
+    background: var(--kode-inline-code-background, var(--kode-bg-highlight));
+    color: var(--kode-inline-code-color, var(--kode-code-fg));
+    padding: var(--kode-inline-code-padding, 0.15em 0.4em);
+    border-radius: var(--kode-inline-code-border-radius, 3px);
+    font-size: var(--kode-inline-code-font-size, 0.9em);
+}
+
+/* Inline code inside a heading — editorial themes often drop the pill
+ * background and colour it with an accent so it reads as part of the
+ * heading rather than as a boxed fragment. Falls back to the normal
+ * inline-code rules so existing consumers see no change. */
+.wysiwyg-heading .wysiwyg-inline-code {
+    background: var(--kode-heading-inline-code-background, var(--kode-inline-code-background, var(--kode-bg-highlight)));
+    color: var(--kode-heading-inline-code-color, var(--kode-inline-code-color, var(--kode-code-fg)));
+    padding: var(--kode-heading-inline-code-padding, var(--kode-inline-code-padding, 0.15em 0.4em));
+    font-size: var(--kode-heading-inline-code-font-size, var(--kode-inline-code-font-size, 0.9em));
+    border-radius: var(--kode-heading-inline-code-border-radius, var(--kode-inline-code-border-radius, 3px));
+}
+
+/* ── Inline formatting ─────────────────────────────────────────────── */
+
+.wysiwyg-bold {
+    font-weight: var(--kode-bold-font-weight, 700);
+}
+
+.wysiwyg-italic {
+    font-style: italic;
+}
+
+.wysiwyg-strikethrough {
+    text-decoration: line-through;
+    opacity: var(--kode-strikethrough-opacity, 0.7);
+}
+
+/* ── Links ─────────────────────────────────────────────────────────── */
+
+.wysiwyg-link {
+    color: var(--kode-link);
+    text-decoration: underline;
+    text-decoration-color: var(--kode-link-decoration-color, var(--kode-accent));
+    text-decoration-thickness: var(--kode-link-decoration-thickness, auto);
+    text-underline-offset: var(--kode-link-underline-offset, 2px);
+    transition: text-decoration-color var(--kode-transition-duration, 0.15s);
+}
+
+.wysiwyg-link:hover {
+    text-decoration-color: var(--kode-link);
+}
+
+/* ── Images ────────────────────────────────────────────────────────── */
+
+.wysiwyg-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--kode-image-border-radius, 6px);
+    margin: var(--kode-image-margin, 0.5em 0);
+    display: block;
+}
+
+/* ── Thematic break ────────────────────────────────────────────────── */
+
+.wysiwyg-hr {
+    border: none;
+    border-top: var(--kode-hr-border-width, 1px) solid var(--kode-hr-border-color, var(--kode-border));
+    margin: var(--kode-hr-margin, 1.5em 0);
+}
+
+/* ── Code blocks (embedded editor variant) ─────────────────────────── */
+
+.wysiwyg-code-block pre.kode-content {
+    margin: 0;
+    padding: var(--kode-code-block-padding, 0.75em 1em);
+    background: transparent;
+    font-size: var(--kode-code-block-font-size, 0.9em);
+}
+
+.wysiwyg-code-lang {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: var(--kode-code-lang-font-size, 0.7em);
+    color: var(--kode-fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ── Scroll container ──────────────────────────────────────────────── */
+
+.tree-wysiwyg-scroll-container {
+    overflow-y: auto;
+    height: 100%;
+    min-height: 0;
+    position: relative;
+    padding: var(--kode-content-padding, 1.5rem 2rem);
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+}
+
+.tree-wysiwyg-scroll-container ::selection {
+    background: transparent;
+}
+.tree-wysiwyg-scroll-container ::-moz-selection {
+    background: transparent;
+}
+
+/* Empty blocks need visible height so the cursor has somewhere to land */
+.tree-wysiwyg-scroll-container p:empty,
+.tree-wysiwyg-scroll-container h1:empty,
+.tree-wysiwyg-scroll-container h2:empty,
+.tree-wysiwyg-scroll-container h3:empty,
+.tree-wysiwyg-scroll-container h4:empty,
+.tree-wysiwyg-scroll-container h5:empty,
+.tree-wysiwyg-scroll-container h6:empty,
+.tree-wysiwyg-scroll-container li:empty,
+.tree-wysiwyg-scroll-container blockquote:empty {
+    min-height: 1.4em;
+}
+
+/* ── Tables ────────────────────────────────────────────────────────── */
+
+.wysiwyg-table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: auto;
+    margin: var(--kode-table-margin, 1.5em 0);
+    font-family: var(--kode-table-font-family, inherit);
+    font-size: var(--kode-table-font-size, 0.875em);
+    line-height: var(--kode-table-line-height, 1.7142857);
+    /* Optional top/bottom rules for editorial ledger-style tables.
+     * Default 0 preserves the pre-theming look (no outer borders). */
+    border-top: var(--kode-table-border-top-width, 0) var(--kode-table-border-top-style, solid) var(--kode-table-border-top-color, var(--kode-border));
+    border-bottom: var(--kode-table-border-bottom-width, 0) var(--kode-table-border-bottom-style, solid) var(--kode-table-border-bottom-color, var(--kode-border));
+}
+
+.wysiwyg-table thead {
+    border-bottom: var(--kode-table-thead-border-bottom-width, 1px) solid var(--kode-table-thead-border-bottom-color, var(--kode-border));
+}
+
+.wysiwyg-table th {
+    font-family: var(--kode-table-th-font-family, inherit);
+    font-weight: var(--kode-table-th-font-weight, 600);
+    font-size: var(--kode-table-th-font-size, inherit);
+    color: var(--kode-table-th-color, var(--kode-fg));
+    letter-spacing: var(--kode-table-th-letter-spacing, normal);
+    text-transform: var(--kode-table-th-text-transform, none);
+    vertical-align: bottom;
+    padding: var(--kode-table-th-padding, 0 0.5714286em 0.5714286em);
+    text-align: left;
+}
+
+.wysiwyg-table td {
+    color: var(--kode-table-td-color, var(--kode-fg));
+    vertical-align: top;
+    padding: var(--kode-table-td-padding, 0.5714286em);
+    text-align: left;
+}
+
+.wysiwyg-table tbody tr {
+    border-bottom: var(--kode-table-tbody-row-border-width, 1px) solid var(--kode-table-tbody-row-border-color, var(--kode-border));
+}
+
+.wysiwyg-table tbody tr:last-child {
+    border-bottom: var(--kode-table-tbody-last-row-border, none);
+}
+
+/* ── Unknown / fallback blocks ─────────────────────────────────────── */
+
+.wysiwyg-unknown {
+    white-space: pre-wrap;
+    font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", monospace);
+    color: var(--kode-fg-dim);
+    margin: 0.5em 0;
+    padding: 0.5em;
+    background: var(--kode-bg-highlight);
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+/* ── Mode toggle ───────────────────────────────────────────────────── */
+
+.kode-mode-toggle {
+    display: flex;
+    gap: var(--kode-toolbar-gap, 2px);
+    padding: var(--kode-mode-toggle-padding, 4px 8px);
+    background: var(--kode-toolbar-bg, var(--kode-bg));
+    border-bottom: var(--kode-toolbar-border-width, 1px) solid var(--kode-toolbar-border-color, var(--kode-border));
+}
+
+.kode-mode-toggle-button {
+    padding: var(--kode-mode-toggle-button-padding, 4px 12px);
+    border: none;
+    border-radius: var(--kode-toolbar-button-border-radius, 4px);
+    cursor: pointer;
+    font-size: var(--kode-mode-toggle-button-font-size, 12px);
+    font-family: inherit;
+    transition: all var(--kode-transition-duration, 0.15s) ease;
+}
+
+.kode-mode-toggle-button.active {
+    background: var(--kode-accent);
+    color: var(--kode-bg);
+}
+
+.kode-mode-toggle-button:not(.active) {
+    background: var(--kode-bg-highlight);
+    color: var(--kode-fg-dim);
+}

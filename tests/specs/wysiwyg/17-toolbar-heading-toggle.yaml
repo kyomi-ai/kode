@@ -1,0 +1,20 @@
+name: "Click H2 toolbar button — converts paragraph to heading"
+scenario: "17-toolbar-heading-toggle"
+editor: wysiwyg
+tags: [toolbar, headings, formatting]
+description: >
+  After selecting text and clicking the H2 toolbar button, the text should
+  convert to an h2 heading with appropriate size and weight.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    headings:
+      h2: "> 0"
+
+  visual:
+    - text_readable: true
+    - heading_visible_with_larger_size: true
+    - no_raw_markdown_markers: true

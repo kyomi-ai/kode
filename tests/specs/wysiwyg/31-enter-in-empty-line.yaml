@@ -1,0 +1,17 @@
+name: "Enter on empty line creates new paragraph break"
+scenario: "31-enter-in-empty-line"
+editor: wysiwyg
+tags: [enter, empty-line, paragraph]
+description: >
+  Pressing Enter on an empty line should create additional paragraph breaks,
+  producing visible vertical spacing.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - visible_paragraph_breaks: true
+    - no_visual_artifacts: true

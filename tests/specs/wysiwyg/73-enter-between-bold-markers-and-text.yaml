@@ -1,0 +1,18 @@
+name: "Enter at **|bold — cursor right after opening markers, before text"
+scenario: "73-enter-between-bold-markers-and-text"
+editor: wysiwyg
+tags: [enter, bold, formatting-boundary, adversarial, newline]
+description: >
+  Pressing Enter right at the boundary between the opening bold markers and
+  the bold text content. This is an edge case for formatting preservation.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true
+    - formatting_not_corrupted: true

@@ -1,0 +1,17 @@
+name: "Cursor at end of list item — cursor height matches list text"
+scenario: "44-cursor-at-end-of-list-item"
+editor: wysiwyg
+tags: [cursor, lists, sizing]
+description: >
+  The cursor at the end of a list item should have a height matching the
+  list item text size.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_height_matches_text: true
+    - no_visual_artifacts: true

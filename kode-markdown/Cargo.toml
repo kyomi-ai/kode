@@ -1,0 +1,13 @@
+[package]
+name = "kode-markdown"
+version = "0.2.0-alpha.1"
+edition = "2021"
+description = "Markdown intelligence layer for kode — parsing, commands, and input rules"
+license = "MIT"
+
+[dependencies]
+kode-core = { path = "../kode-core" }
+arborium-tree-sitter = "2.16"
+arborium-markdown = "2.16"
+
+[dev-dependencies]

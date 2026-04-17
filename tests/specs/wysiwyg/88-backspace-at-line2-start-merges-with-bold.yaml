@@ -1,0 +1,19 @@
+name: "Backspace at start of line after bold line — bold on line 1 should survive merge"
+scenario: "88-backspace-at-line2-start-merges-with-bold"
+editor: wysiwyg
+tags: [backspace, bold, merge, formatting, adversarial]
+description: >
+  After merging a line into a previous bold line via Backspace, the bold
+  formatting on the first line should survive the merge.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_formatting_preserved: true
+    - lines_merged: true
+    - no_raw_markdown_markers: true

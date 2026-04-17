@@ -1,0 +1,18 @@
+name: "Enter inside **X** (single char bold) — edge case for empty formatting spans"
+scenario: "119-enter-in-single-char-bold"
+editor: wysiwyg
+tags: [enter, bold, single-char, edge-case, adversarial, newline]
+description: >
+  Pressing Enter inside a single-character bold span (**X**) is an edge case
+  that tests handling of potentially empty formatting spans after split.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true
+    - formatting_not_corrupted: true

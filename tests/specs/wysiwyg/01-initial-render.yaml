@@ -1,0 +1,25 @@
+name: "WYSIWYG with default markdown content rendered"
+scenario: "01-initial-render"
+editor: wysiwyg
+tags: [rendering, baseline]
+description: >
+  Verifies that the WYSIWYG editor renders default markdown content correctly
+  on initial load. Headings, paragraphs, lists, and code blocks should all be
+  visible and properly styled.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    headings:
+      h1: "> 0"
+    lists:
+      ul: "> 0"
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - no_blank_editor: true
+    - no_raw_markdown_markers: true
+    - toolbar_visible: true

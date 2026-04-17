@@ -1,0 +1,19 @@
+name: "Enter inside ## **Bold** Heading — heading splits, bold preserved"
+scenario: "97-enter-inside-heading-with-bold"
+editor: wysiwyg
+tags: [enter, headings, bold, formatting, adversarial, newline]
+description: >
+  Pressing Enter inside a heading that contains bold text should split the
+  heading while preserving bold formatting on the appropriate parts.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_preserved_after_split: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

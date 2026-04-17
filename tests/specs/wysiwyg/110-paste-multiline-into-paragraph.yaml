@@ -1,0 +1,18 @@
+name: "Paste multiline text into middle of paragraph — multiple paragraphs created"
+scenario: "110-paste-multiline-into-paragraph"
+editor: wysiwyg
+tags: [paste, multiline, paragraph]
+description: >
+  Pasting multiline text into the middle of a paragraph should create multiple
+  paragraphs from the pasted content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - multiple_paragraphs_from_paste: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,18 @@
+name: "Backspace at start of heading merges heading text into previous paragraph"
+scenario: "115-backspace-merges-heading-into-paragraph"
+editor: wysiwyg
+tags: [backspace, headings, merge, adversarial]
+description: >
+  Pressing Backspace at the start of a heading should merge the heading text
+  into the previous paragraph, converting the heading text to paragraph style.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - heading_text_merged_into_paragraph: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

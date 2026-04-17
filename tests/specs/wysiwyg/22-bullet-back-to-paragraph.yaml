@@ -1,0 +1,19 @@
+name: "Toggle bullet list off — returns to plain paragraph"
+scenario: "22-bullet-back-to-paragraph"
+editor: wysiwyg
+tags: [toolbar, lists, toggle]
+description: >
+  Toggling bullet list on and then off should return the content to a plain
+  paragraph without list markers.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+
+  visual:
+    - text_readable: true
+    - no_list_markers_on_toggled_content: true
+    - content_text_preserved: true
+    - no_raw_markdown_markers: true

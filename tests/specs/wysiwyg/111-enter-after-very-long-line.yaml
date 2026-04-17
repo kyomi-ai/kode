@@ -1,0 +1,18 @@
+name: "Very long wrapping line then Enter — newline after wrapped content works"
+scenario: "111-enter-after-very-long-line"
+editor: wysiwyg
+tags: [enter, long-line, wrapping, newline]
+description: >
+  After a very long line that wraps visually, pressing Enter should create a
+  new line correctly below the wrapped content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_line_below_wrapped_content: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

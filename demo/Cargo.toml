@@ -1,0 +1,13 @@
+[package]
+name = "kode-demo"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+kode-leptos = { path = "../kode-leptos" }
+leptos = { version = "0.8", features = ["csr"] }
+console_log = "1"
+console_error_panic_hook = "0.1"
+log = "0.4"

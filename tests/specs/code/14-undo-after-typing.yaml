@@ -1,0 +1,21 @@
+name: "Multiple cursors after undo"
+scenario: "14-multiple-cursors-after-undo"
+editor: code
+tags: [undo, cursor, content]
+description: >
+  After typing and then performing undo, the content should revert correctly.
+  The cursor should remain visible and positioned properly.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+      cursor: true
+    layering:
+      cursorVisible: true
+
+  visual:
+    - text_readable: true
+    - cursor_visible_in_screenshot: true
+    - content_restored_after_undo: true

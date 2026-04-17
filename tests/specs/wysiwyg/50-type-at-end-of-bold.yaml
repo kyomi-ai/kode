@@ -1,0 +1,18 @@
+name: "Type at end of bold text — new text should be normal (not bold)"
+scenario: "50-type-at-end-of-bold"
+editor: wysiwyg
+tags: [typing, bold, formatting-boundary]
+description: >
+  When typing immediately after bold text, the new text should render as
+  normal weight, not inherit the bold formatting.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_text_is_normal_weight: true
+    - bold_text_still_bold: true
+    - no_raw_markdown_markers: true

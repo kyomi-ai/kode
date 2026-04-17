@@ -1,0 +1,19 @@
+name: "Enter in list item then Tab — should create nested/indented list item"
+scenario: "87-tab-indent-after-enter-in-list"
+editor: wysiwyg
+tags: [enter, tab, lists, indentation, nesting, newline]
+description: >
+  After pressing Enter in a list item and then Tab, the new item should
+  become a nested/indented sub-list item.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - nested_list_item_indented: true
+    - no_raw_markdown_markers: true

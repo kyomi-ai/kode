@@ -1,0 +1,20 @@
+name: "Source mode edit then switch back to WYSIWYG"
+scenario: "10-source-to-wysiwyg-roundtrip"
+editor: wysiwyg
+tags: [source-mode, roundtrip, mode-switch]
+description: >
+  After editing markdown in source mode and switching back to WYSIWYG, the
+  new content (e.g., a new heading) should render correctly without data loss.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    headings:
+      h2: "> 0"
+
+  visual:
+    - text_readable: true
+    - new_heading_visible: true
+    - no_raw_markdown_markers: true
+    - content_preserved_after_roundtrip: true

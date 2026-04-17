@@ -1,0 +1,23 @@
+name: "Select text with mouse drag — selection highlight visible"
+scenario: "04-text-selection"
+editor: code
+tags: [selection, highlight]
+description: >
+  After selecting text with a mouse drag, selection highlights should be visible.
+  The selection background must be semi-transparent (rgba with alpha < 1) so
+  that the underlying text remains readable through the highlight.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+      content: true
+    counts:
+      selectionHighlights: "> 0"
+    layering:
+      selectionBackgrounds: "rgba_with_alpha_lt_1"
+
+  visual:
+    - text_readable: true
+    - selection_highlight_visible: true
+    - text_readable_through_selection: true

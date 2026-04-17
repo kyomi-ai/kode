@@ -1,0 +1,19 @@
+name: "Shift+Enter inside bold — soft break with bold markers preserved"
+scenario: "69-shift-enter-in-bold"
+editor: wysiwyg
+tags: [shift-enter, bold, soft-break, formatting, newline]
+description: >
+  Pressing Shift+Enter inside bold text should create a soft break while
+  preserving the bold formatting markers on both sides of the break.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - soft_break_visible: true
+    - bold_preserved_across_break: true
+    - no_raw_markdown_markers: true

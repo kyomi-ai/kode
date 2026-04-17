@@ -1,0 +1,18 @@
+name: "Click link toolbar button — link markdown inserted at cursor"
+scenario: "36-insert-link-via-toolbar"
+editor: wysiwyg
+tags: [toolbar, links, formatting]
+description: >
+  After selecting text and clicking the Insert Link toolbar button, the
+  selected text should become a link with appropriate styling.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+
+  visual:
+    - text_readable: true
+    - link_styled_distinctly: true
+    - no_raw_markdown_markers: true

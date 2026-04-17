@@ -1,0 +1,21 @@
+name: "Click Bold toolbar button — selected text becomes bold"
+scenario: "16-toolbar-bold-toggle"
+editor: wysiwyg
+tags: [toolbar, bold, formatting]
+description: >
+  After selecting text and clicking the Bold toolbar button, the selected text
+  should become bold. The toolbar action should apply formatting without
+  showing raw markdown markers.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_text_visually_heavier: true
+    - no_raw_markdown_markers: true
+    - toolbar_visible: true

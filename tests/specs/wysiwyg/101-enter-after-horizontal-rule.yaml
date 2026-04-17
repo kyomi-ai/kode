@@ -1,0 +1,18 @@
+name: "Enter after horizontal rule — new paragraph below the rule"
+scenario: "101-enter-after-horizontal-rule"
+editor: wysiwyg
+tags: [enter, horizontal-rule, newline]
+description: >
+  Pressing Enter after a horizontal rule should create a new paragraph below
+  the rule, not duplicate the rule.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_paragraph_below_rule: true
+    - horizontal_rule_intact: true
+    - no_raw_markdown_markers: true

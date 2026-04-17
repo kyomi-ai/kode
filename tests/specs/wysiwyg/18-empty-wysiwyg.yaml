@@ -1,0 +1,18 @@
+name: "Clear all content — empty state renders cleanly"
+scenario: "18-empty-wysiwyg"
+editor: wysiwyg
+tags: [empty, edge-case]
+description: >
+  After clearing all content, the WYSIWYG editor should render cleanly with
+  no leftover content, no visual artifacts, and a usable empty state.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - no_visual_artifacts: true
+    - editor_container_visible: true
+    - no_stale_content: true
+    - toolbar_visible: true

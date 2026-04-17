@@ -1,0 +1,18 @@
+name: "Select text and toggle strikethrough via toolbar S button"
+scenario: "34-strikethrough-toggle"
+editor: wysiwyg
+tags: [toolbar, strikethrough, formatting]
+description: >
+  After selecting text and clicking the Strikethrough toolbar button, the
+  selected text should render with a line through it.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+
+  visual:
+    - text_readable: true
+    - strikethrough_line_visible: true
+    - no_raw_markdown_markers: true

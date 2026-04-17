@@ -1,0 +1,19 @@
+name: "Enter inside bold then Ctrl+Z — bold markers restored to single span"
+scenario: "104-undo-enter-inside-bold"
+editor: wysiwyg
+tags: [undo, enter, bold, formatting, adversarial, newline]
+description: >
+  After pressing Enter inside bold text and then undoing, the bold text should
+  be restored to a single contiguous bold span.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_restored_to_single_span: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

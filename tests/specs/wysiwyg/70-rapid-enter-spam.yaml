@@ -1,0 +1,18 @@
+name: "Press Enter 5 times rapidly — all line breaks created, no crash"
+scenario: "70-rapid-enter-spam"
+editor: wysiwyg
+tags: [enter, performance, stress, newline]
+description: >
+  Pressing Enter 5 times rapidly followed by typing should create all line
+  breaks without crashes, freezes, or missing breaks.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - multiple_line_breaks_visible: true
+    - typed_text_visible: true
+    - no_visual_artifacts: true

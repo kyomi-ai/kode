@@ -1,0 +1,18 @@
+name: "Undo an Enter then Redo — the Enter should come back"
+scenario: "106-redo-after-undo-enter"
+editor: wysiwyg
+tags: [undo, redo, enter, newline]
+description: >
+  After undoing an Enter and then pressing Ctrl+Shift+Z (redo), the Enter
+  should be restored, splitting the line again.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - line_split_restored_after_redo: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

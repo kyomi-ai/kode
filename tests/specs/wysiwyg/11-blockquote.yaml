@@ -1,0 +1,18 @@
+name: "Blockquote renders with left border and indentation"
+scenario: "11-blockquote"
+editor: wysiwyg
+tags: [blockquote, rendering]
+description: >
+  Blockquotes should render with a visible left border and indented text,
+  visually distinct from regular paragraphs.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - blockquote_has_left_border: true
+    - blockquote_text_indented: true
+    - no_raw_markdown_markers: true

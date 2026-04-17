@@ -1,0 +1,18 @@
+name: "Enter at very start of blockquote — blank line inserted before quote"
+scenario: "99-enter-at-start-of-blockquote"
+editor: wysiwyg
+tags: [enter, blockquote, newline]
+description: >
+  Pressing Enter at the very start of a blockquote should insert a blank line
+  or paragraph before the blockquote, not split the quote content.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - blank_line_before_blockquote: true
+    - blockquote_content_intact: true
+    - no_raw_markdown_markers: true

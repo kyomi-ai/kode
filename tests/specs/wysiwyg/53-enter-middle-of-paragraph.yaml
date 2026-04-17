@@ -1,0 +1,18 @@
+name: "Enter in middle of paragraph — splits into two paragraphs"
+scenario: "53-enter-middle-of-paragraph"
+editor: wysiwyg
+tags: [enter, paragraph, split, newline]
+description: >
+  Pressing Enter in the middle of a paragraph should split it into two
+  separate paragraphs at the cursor position.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - two_paragraphs_visible: true
+    - paragraph_spacing_visible: true
+    - no_raw_markdown_markers: true

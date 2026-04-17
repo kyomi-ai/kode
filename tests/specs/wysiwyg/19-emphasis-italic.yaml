@@ -1,0 +1,18 @@
+name: "Italic text (*text*) renders with proper font style"
+scenario: "19-emphasis-italic"
+editor: wysiwyg
+tags: [italic, rendering]
+description: >
+  Italic text should render with a slanted font style, visually distinct
+  from normal text, with no raw * markers visible.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - italic_text_visually_slanted: true
+    - no_raw_markdown_markers: true

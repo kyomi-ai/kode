@@ -1,0 +1,18 @@
+name: "Enter right at end of inline code text (before closing backtick) — code split or escaped"
+scenario: "116-enter-splits-inline-code-at-boundary"
+editor: wysiwyg
+tags: [enter, inline-code, boundary, adversarial, newline]
+description: >
+  Pressing Enter right at the end of inline code text (just before the closing
+  backtick) should handle the boundary correctly without leaving broken syntax.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_broken_code_syntax: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

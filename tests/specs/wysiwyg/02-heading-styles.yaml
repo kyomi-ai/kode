@@ -1,0 +1,21 @@
+name: "Verify h1, h2, h3 rendering"
+scenario: "02-heading-styles"
+editor: wysiwyg
+tags: [headings, rendering, typography]
+description: >
+  Heading elements h1, h2, and h3 should render with visually distinct sizes
+  and weights. Each heading level should be clearly distinguishable.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    headings:
+      h1: "> 0"
+      h2: "> 0"
+
+  visual:
+    - text_readable: true
+    - headings_visually_distinct: true
+    - heading_sizes_hierarchical: true
+    - no_raw_markdown_markers: true

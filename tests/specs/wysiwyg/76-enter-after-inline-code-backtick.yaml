@@ -1,0 +1,18 @@
+name: "Enter right after closing backtick of inline code"
+scenario: "76-enter-after-inline-code-backtick"
+editor: wysiwyg
+tags: [enter, inline-code, formatting-boundary, adversarial, newline]
+description: >
+  Pressing Enter right after the closing backtick of inline code should
+  create a new line where subsequent text is not in code styling.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - new_line_text_not_code_styled: true
+    - no_raw_markdown_markers: true
+    - no_visual_artifacts: true

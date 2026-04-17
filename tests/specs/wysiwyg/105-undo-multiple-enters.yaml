@@ -1,0 +1,18 @@
+name: "Multiple Enters then undo all — should return to original single line"
+scenario: "105-undo-multiple-enters"
+editor: wysiwyg
+tags: [undo, enter, multiple, newline]
+description: >
+  After pressing Enter multiple times and then undoing all of them, the
+  content should return to the original single-line state.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_restored_to_original: true
+    - no_extra_blank_lines: true
+    - no_raw_markdown_markers: true

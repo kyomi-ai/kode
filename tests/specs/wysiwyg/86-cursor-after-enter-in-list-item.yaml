@@ -1,0 +1,20 @@
+name: "Enter at end of list item — cursor on new bullet item, type to verify"
+scenario: "86-cursor-after-enter-in-list-item"
+editor: wysiwyg
+tags: [enter, cursor, lists, positioning, newline]
+description: >
+  After pressing Enter at the end of a list item and typing, the typed text
+  should appear on the new list item, confirming cursor position.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - typed_text_on_new_list_item: true
+    - list_marker_on_new_item: true
+    - no_raw_markdown_markers: true

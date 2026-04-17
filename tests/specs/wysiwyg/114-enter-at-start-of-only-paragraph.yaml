@@ -1,0 +1,18 @@
+name: "Document has one paragraph — Enter at start creates blank above, text moves down"
+scenario: "114-enter-at-start-of-only-paragraph"
+editor: wysiwyg
+tags: [enter, paragraph, edge-case, newline]
+description: >
+  In a document with a single paragraph, pressing Enter at the start should
+  insert a blank line above and push the text down.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - blank_line_above_text: true
+    - text_moved_down: true
+    - no_raw_markdown_markers: true

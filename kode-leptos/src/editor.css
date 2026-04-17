@@ -1,0 +1,170 @@
+.kode-editor {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    font-family: var(--kode-font-family, 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace);
+    font-size: var(--kode-font-size, 14px);
+    background: var(--kode-bg);
+    color: var(--kode-fg);
+    overflow: hidden;
+    cursor: text;
+}
+
+.kode-hidden-textarea {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    padding: 0;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    z-index: -1;
+}
+
+.kode-scroll-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.kode-content {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    line-height: var(--kode-line-height, 20px);
+    min-height: 100%;
+    background: transparent;
+}
+
+.kode-gutter {
+    display: inline-block;
+    width: var(--kode-gutter-width, 48px);
+    padding: 0 var(--kode-gutter-padding-right, 16px) 0 var(--kode-gutter-padding-left, 8px);
+    text-align: right;
+    color: var(--kode-gutter-fg);
+    user-select: none;
+    flex-shrink: 0;
+    border-right: 1px solid var(--kode-gutter-border);
+    margin-right: var(--kode-gutter-margin-right, 12px);
+}
+
+.kode-cursor {
+    background: var(--kode-cursor);
+}
+
+.kode-selection {
+    background: var(--kode-selection);
+    left: 0;
+    right: 0;
+}
+
+.kode-current-line {
+    background: var(--kode-current-line);
+}
+
+.kode-overlay {
+    pointer-events: none;
+}
+
+.kode-placeholder {
+    color: var(--kode-fg-dim);
+    user-select: none;
+}
+
+.kode-marker-error {
+    position: absolute;
+    border-bottom: 2px wavy var(--kode-marker-error);
+    background: color-mix(in srgb, var(--kode-marker-error) 10%, transparent);
+    pointer-events: auto;
+}
+
+.kode-marker-warning {
+    position: absolute;
+    border-bottom: 2px wavy var(--kode-marker-warning);
+    background: color-mix(in srgb, var(--kode-marker-warning) 10%, transparent);
+    pointer-events: auto;
+}
+
+.kode-marker-info {
+    position: absolute;
+    border-bottom: 2px wavy var(--kode-marker-info);
+    background: color-mix(in srgb, var(--kode-marker-info) 10%, transparent);
+    pointer-events: auto;
+}
+
+.kode-marker-hint {
+    position: absolute;
+    border-bottom: 2px wavy var(--kode-marker-hint);
+    pointer-events: auto;
+}
+
+.kode-completion-popup {
+    position: absolute;
+    z-index: 10;
+    background: var(--kode-completion-bg, var(--kode-bg));
+    border: 1px solid var(--kode-completion-border, var(--kode-gutter-border));
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    max-height: 200px;
+    overflow-y: auto;
+    min-width: 200px;
+    max-width: 400px;
+    pointer-events: auto;
+}
+
+.kode-completion-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    line-height: 22px;
+}
+
+.kode-completion-item:hover {
+    background: var(--kode-completion-hover-bg, var(--kode-selection));
+}
+
+.kode-completion-item--selected {
+    background: var(--kode-completion-selected-bg, var(--kode-selection));
+}
+
+.kode-completion-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+    font-weight: bold;
+    border-radius: 3px;
+    flex-shrink: 0;
+    background: var(--kode-completion-kind-bg, rgba(128, 128, 128, 0.2));
+    color: var(--kode-completion-kind-fg, var(--kode-fg));
+}
+
+.kode-completion-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kode-completion-detail {
+    color: var(--kode-completion-detail-fg, var(--kode-gutter-fg));
+    font-size: 0.9em;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+    max-width: 150px;
+}

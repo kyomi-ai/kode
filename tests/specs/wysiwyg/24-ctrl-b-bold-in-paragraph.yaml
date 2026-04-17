@@ -1,0 +1,18 @@
+name: "Ctrl+B toggles bold on selected text in paragraph"
+scenario: "24-ctrl-b-bold-in-paragraph"
+editor: wysiwyg
+tags: [keyboard, bold, formatting]
+description: >
+  After selecting text and pressing Ctrl+B, the selected text should become
+  bold with no raw ** markers visible.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_text_visually_heavier: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,17 @@
+name: "Full document scrolled to bottom — all content rendered"
+scenario: "20-full-page-scroll"
+editor: wysiwyg
+tags: [scroll, rendering]
+description: >
+  After scrolling to the bottom of the document, all content should be
+  rendered without blank areas or missing blocks.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - no_blank_areas: true
+    - content_rendered_at_bottom: true

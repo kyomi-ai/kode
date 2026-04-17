@@ -1,0 +1,17 @@
+name: "After Enter, cursor is on new line at column 0"
+scenario: "67-cursor-after-enter"
+editor: wysiwyg
+tags: [enter, cursor, positioning, newline]
+description: >
+  After pressing Enter, the cursor should be positioned at the beginning of
+  the new line (column 0), not remaining on the previous line.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - cursor_visible_in_screenshot: true
+    - cursor_on_new_line: true
+    - cursor_at_start_of_line: true

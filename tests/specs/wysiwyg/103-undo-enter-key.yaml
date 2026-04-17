@@ -1,0 +1,19 @@
+name: "Type, Enter, type more, Ctrl+Z — undo should remove the Enter"
+scenario: "103-undo-enter-key"
+editor: wysiwyg
+tags: [undo, enter, newline]
+description: >
+  After typing, pressing Enter, typing more, and then pressing Ctrl+Z
+  multiple times, the undo should remove the Enter and restore the original
+  single-line state.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - content_restored_to_single_line: true
+    - no_visual_artifacts: true
+    - no_raw_markdown_markers: true

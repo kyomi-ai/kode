@@ -1,0 +1,17 @@
+name: "Switch to source mode — raw markdown visible"
+scenario: "09-source-mode"
+editor: wysiwyg
+tags: [source-mode, mode-switch]
+description: >
+  After clicking the Source button, the editor should switch to source mode
+  showing raw markdown text with markdown syntax characters visible.
+
+assertions:
+  dom:
+    elements:
+      editor: true
+
+  visual:
+    - text_readable: true
+    - raw_markdown_visible: true
+    - source_mode_active: true

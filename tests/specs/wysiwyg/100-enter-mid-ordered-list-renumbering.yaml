@@ -1,0 +1,20 @@
+name: "Enter in middle of ordered list — subsequent items should renumber"
+scenario: "100-enter-mid-ordered-list-renumbering"
+editor: wysiwyg
+tags: [enter, ordered-list, renumbering, newline]
+description: >
+  Pressing Enter in the middle of an ordered list to create a new item should
+  cause subsequent items to renumber correctly.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    lists:
+      ol: "> 0"
+
+  visual:
+    - text_readable: true
+    - new_item_inserted: true
+    - numbering_sequential: true
+    - no_raw_markdown_markers: true

@@ -1,0 +1,19 @@
+name: "Type ***bold italic*** directly — renders as bold+italic"
+scenario: "39-bold-italic-combined"
+editor: wysiwyg
+tags: [bold, italic, combined, formatting]
+description: >
+  Typing ***bold italic*** text should render with both bold weight and italic
+  style applied simultaneously, with no raw *** markers visible.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+    italic: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_italic_combined_visible: true
+    - no_raw_markdown_markers: true

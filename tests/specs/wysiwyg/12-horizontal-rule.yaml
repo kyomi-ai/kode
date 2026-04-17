@@ -1,0 +1,17 @@
+name: "Horizontal rule (---) renders as visible separator"
+scenario: "12-horizontal-rule"
+editor: wysiwyg
+tags: [horizontal-rule, rendering]
+description: >
+  Horizontal rules should render as a visible separator line between content
+  blocks, not as raw dashes.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - horizontal_rule_visible: true
+    - no_raw_markdown_markers: true

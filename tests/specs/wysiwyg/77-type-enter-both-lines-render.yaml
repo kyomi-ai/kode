@@ -1,0 +1,18 @@
+name: "Type text, Enter, type more — both lines must be visible"
+scenario: "77-type-enter-both-lines-render"
+editor: wysiwyg
+tags: [typing, enter, rendering, newline]
+description: >
+  After typing text, pressing Enter, and typing more text, both lines of
+  text must be visible and rendered correctly.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+
+  visual:
+    - text_readable: true
+    - both_lines_visible: true
+    - no_overlapping_text: true
+    - no_raw_markdown_markers: true

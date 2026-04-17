@@ -1,0 +1,20 @@
+name: "Bold text inside list items renders correctly"
+scenario: "15-bold-in-list"
+editor: wysiwyg
+tags: [bold, lists, rendering]
+description: >
+  Bold text within list items should render with heavier font weight,
+  with no raw ** markers visible.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    bold: "> 0"
+    lists:
+      ul: "> 0"
+
+  visual:
+    - text_readable: true
+    - bold_text_visually_heavier: true
+    - no_raw_markdown_markers: true

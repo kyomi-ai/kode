@@ -1,0 +1,19 @@
+name: "Click blockquote toolbar button — paragraph becomes blockquote"
+scenario: "35-blockquote-via-toolbar"
+editor: wysiwyg
+tags: [toolbar, blockquote, formatting]
+description: >
+  Clicking the Blockquote toolbar button should convert the current paragraph
+  to a blockquote with a visible left border and indentation.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+      toolbar: true
+
+  visual:
+    - text_readable: true
+    - blockquote_has_left_border: true
+    - blockquote_text_indented: true
+    - no_raw_markdown_markers: true

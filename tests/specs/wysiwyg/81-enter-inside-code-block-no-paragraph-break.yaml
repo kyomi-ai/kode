@@ -1,0 +1,19 @@
+name: "Enter inside fenced code block — stays in code block, no paragraph split"
+scenario: "81-enter-inside-code-block-no-paragraph-break"
+editor: wysiwyg
+tags: [enter, code-block, newline, adversarial]
+description: >
+  Pressing Enter inside a fenced code block should add a new line within the
+  code block, not split it into a separate paragraph.
+
+assertions:
+  dom:
+    elements:
+      wysiwyg: true
+    codeBlocks: "> 0"
+
+  visual:
+    - text_readable: true
+    - code_block_still_intact: true
+    - new_line_inside_code_block: true
+    - no_paragraph_split: true
