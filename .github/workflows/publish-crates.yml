@@ -13,6 +13,12 @@ on:
         default: 'false'
         type: boolean
 
+env:
+  # rust-lang/crates-io-auth-action@v1 still declares `using: node20` as of
+  # v1.0.4 (2026-03-23). GitHub auto-forces Node 24 on 2026-06-02; this opts
+  # in early and silences the deprecation warning in the meantime.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -21,7 +27,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
