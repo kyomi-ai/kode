@@ -179,11 +179,11 @@ fn highlight_lines_by_language(
     let mut i = 0;
 
     while i < lines.len() {
-        let group_lang = langs[i];
+        let group_lang = &langs[i];
         let group_start = i;
 
         // Collect consecutive lines with the same language
-        while i < lines.len() && langs[i] == group_lang {
+        while i < lines.len() && &langs[i] == group_lang {
             i += 1;
         }
 
@@ -199,7 +199,7 @@ fn highlight_lines_by_language(
 
 #[component]
 pub fn CodeEditor(
-    #[prop(into, default = Signal::stored(Language::Plain))]
+    #[prop(into, default = Signal::stored(Language::PLAIN))]
     language: Signal<Language>,
     #[prop(into, default = Signal::stored(String::new()))]
     content: Signal<String>,
@@ -886,7 +886,7 @@ pub fn CodeEditor(
 
                         // For markdown, scan lines before the viewport to establish
                         // fenced code block state (e.g. which language to highlight).
-                        let mut fence_tracker = if lang == highlight::Language::Markdown {
+                        let mut fence_tracker = if lang.name() == "markdown" {
                             let mut ft = highlight::FenceTracker::new();
                             for pre_idx in 0..render_start {
                                 let pre_line = ed.buffer().line(pre_idx).to_string();
@@ -913,7 +913,7 @@ pub fn CodeEditor(
                         let per_line_langs: Vec<highlight::Language> = if let Some(ref mut ft) = fence_tracker {
                             line_texts.iter().map(|(_, s)| ft.process_line(s)).collect()
                         } else {
-                            vec![lang; line_texts.len()]
+                            vec![lang.clone(); line_texts.len()]
                         };
 
                         let highlighted: Vec<String> = highlight_lines_by_language(

@@ -1,51 +1,81 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 thread_local! {
     static HIGHLIGHTER: RefCell<arborium::Highlighter> = RefCell::new(arborium::Highlighter::new());
 }
 
-/// Supported languages for syntax highlighting.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Language {
-    Sql,
-    Yaml,
-    Markdown,
-    JavaScript,
-    TypeScript,
-    Python,
-    Rust,
-    Go,
-    Html,
-    Css,
-    Json,
-    Bash,
-    C,
-    Cpp,
-    Java,
-    #[default]
-    Plain,
-}
+/// A language identifier used to select a grammar for syntax highlighting.
+///
+/// This is a thin wrapper around a string tag that matches the name registered
+/// with [`arborium::Highlighter`] (e.g. `"sql"`, `"markdown"`, `"python"`).
+///
+/// Which tags actually highlight at runtime depends on which `lang-*` features
+/// the *consumer* has enabled on their own `arborium` dependency. `kode-leptos`
+/// does not enable any language by default — consumers opt in to the grammars
+/// they need and pay only for those in the final WASM.
+///
+/// Unknown or unregistered tags fall back to plain-text HTML escaping.
+///
+/// An empty name ([`Language::PLAIN`]) always renders as plain text.
+///
+/// # Construction
+///
+/// ```no_run
+/// use kode_leptos::Language;
+///
+/// // Zero-cost from a string literal
+/// let sql = Language::new_static("sql");
+///
+/// // From an owned String (e.g. a markdown fence info string)
+/// let dynamic = Language::new(format!("{}", "markdown"));
+///
+/// // Plain text
+/// let plain = Language::PLAIN;
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Language(Cow<'static, str>);
 
 impl Language {
-    fn arborium_name(&self) -> Option<&'static str> {
-        match self {
-            Language::Sql => Some("sql"),
-            Language::Yaml => Some("yaml"),
-            Language::Markdown => Some("markdown"),
-            Language::JavaScript => Some("javascript"),
-            Language::TypeScript => Some("typescript"),
-            Language::Python => Some("python"),
-            Language::Rust => Some("rust"),
-            Language::Go => Some("go"),
-            Language::Html => Some("html"),
-            Language::Css => Some("css"),
-            Language::Json => Some("json"),
-            Language::Bash => Some("bash"),
-            Language::C => Some("c"),
-            Language::Cpp => Some("cpp"),
-            Language::Java => Some("java"),
-            Language::Plain => None,
-        }
+    /// Plain text — no highlighting is attempted.
+    pub const PLAIN: Language = Language(Cow::Borrowed(""));
+
+    /// Construct a language from a `'static` string tag.
+    ///
+    /// Prefer this for string literals — it is `const`, zero-cost, and never
+    /// allocates.
+    pub const fn new_static(name: &'static str) -> Self {
+        Self(Cow::Borrowed(name))
+    }
+
+    /// Construct a language from a string tag, borrowed or owned.
+    ///
+    /// Use this when the tag comes from a dynamic source such as a markdown
+    /// fence info string or a configuration file.
+    pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
+        Self(name.into())
+    }
+
+    /// The grammar tag passed to the highlighter (e.g. `"sql"`).
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns `true` if this represents plain text (no highlighting).
+    pub fn is_plain(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<&'static str> for Language {
+    fn from(s: &'static str) -> Self {
+        Self::new_static(s)
+    }
+}
+
+impl From<String> for Language {
+    fn from(s: String) -> Self {
+        Self(Cow::Owned(s))
     }
 }
 
@@ -54,15 +84,14 @@ impl Language {
 /// **Note:** For multi-line context-dependent languages (SQL, Python, etc.),
 /// prefer [`highlight_block`] which parses the full text and splits into lines.
 /// Single-line highlighting may miss keywords that depend on surrounding context.
-pub fn highlight_line(text: &str, language: Language) -> String {
-    let lang_name = match language.arborium_name() {
-        Some(name) => name,
-        None => return html_escape(text),
-    };
+pub fn highlight_line(text: &str, language: &Language) -> String {
+    if language.is_plain() {
+        return html_escape(text);
+    }
 
     HIGHLIGHTER.with(|h| {
         let mut highlighter = h.borrow_mut();
-        match highlighter.highlight(lang_name, text) {
+        match highlighter.highlight(language.name(), text) {
             Ok(result) => result.to_string(),
             Err(_) => html_escape(text),
         }
@@ -75,18 +104,17 @@ pub fn highlight_line(text: &str, language: Language) -> String {
 /// so keywords like `FROM` and `WHERE` in SQL are correctly identified.
 ///
 /// Returns a `Vec<String>` with one HTML string per input line.
-pub fn highlight_block(lines: &[&str], language: Language) -> Vec<String> {
-    let lang_name = match language.arborium_name() {
-        Some(name) => name,
-        None => return lines.iter().map(|l| html_escape(l)).collect(),
-    };
+pub fn highlight_block(lines: &[&str], language: &Language) -> Vec<String> {
+    if language.is_plain() {
+        return lines.iter().map(|l| html_escape(l)).collect();
+    }
 
     // Join lines for multi-line parsing
     let full_text = lines.join("\n");
 
     let full_html = HIGHLIGHTER.with(|h| {
         let mut highlighter = h.borrow_mut();
-        match highlighter.highlight(lang_name, &full_text) {
+        match highlighter.highlight(language.name(), &full_text) {
             Ok(result) => result.to_string(),
             Err(_) => html_escape(&full_text),
         }
@@ -164,31 +192,43 @@ fn closing_tag(open_tag: &str) -> String {
     format!("</{name}>")
 }
 
-/// Resolve a fenced code block info string to a `Language`.
+/// Resolve a fenced code block info string to a [`Language`].
 ///
-/// Maps well-known names and aliases (e.g. "chartml" → Yaml) to the
-/// corresponding `Language` variant. Unknown names resolve to `Plain`.
+/// Canonicalizes common aliases (e.g. `"md"` → `"markdown"`, `"yml"` → `"yaml"`,
+/// `"jsx"` → `"javascript"`) so that the returned tag matches the name
+/// `arborium` registers a grammar under. Unknown names resolve to
+/// [`Language::PLAIN`].
+///
+/// The set of aliases here is a superset of widely-recognized markdown fence
+/// tags; it does *not* guarantee the resulting language is available at
+/// runtime — that still depends on which `arborium` language features the
+/// consumer enabled.
 pub fn language_from_info_string(info: &str) -> Language {
     let lang = info.split_whitespace().next().unwrap_or("");
-    match lang.to_lowercase().as_str() {
-        "sql" => Language::Sql,
-        "yaml" | "yml" | "chartml" => Language::Yaml,
-        "markdown" | "md" => Language::Markdown,
-        "javascript" | "js" | "jsx" | "mjs" | "cjs" => Language::JavaScript,
-        "typescript" | "ts" | "tsx" | "mts" | "cts" => Language::TypeScript,
-        "python" | "py" => Language::Python,
-        "rust" | "rs" => Language::Rust,
-        "go" | "golang" => Language::Go,
-        "html" | "htm" => Language::Html,
-        "css" => Language::Css,
-        "json" | "jsonc" => Language::Json,
-        "bash" | "sh" | "shell" | "zsh" => Language::Bash,
-        "c" | "h" => Language::C,
-        "cpp" | "c++" | "cxx" | "hpp" => Language::Cpp,
-        "java" => Language::Java,
-        _ => Language::Plain,
-    }
+    let canonical: &'static str = match lang.to_lowercase().as_str() {
+        "sql" => "sql",
+        "yaml" | "yml" | "chartml" => "yaml",
+        "markdown" | "md" => "markdown",
+        "javascript" | "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "typescript" | "ts" | "tsx" | "mts" | "cts" => "typescript",
+        "python" | "py" => "python",
+        "rust" | "rs" => "rust",
+        "go" | "golang" => "go",
+        "html" | "htm" => "html",
+        "css" => "css",
+        "json" | "jsonc" => "json",
+        "bash" | "sh" | "shell" | "zsh" => "bash",
+        "c" | "h" => "c",
+        "cpp" | "c++" | "cxx" | "hpp" => "cpp",
+        "java" => "java",
+        _ => return Language::PLAIN,
+    };
+    Language::new_static(canonical)
 }
+
+/// The markdown language tag — used internally by [`FenceTracker`] when
+/// emitting fence delimiter lines and ambient text.
+const LANG_MARKDOWN: Language = Language::new_static("markdown");
 
 /// Tracks fenced code block state while scanning a markdown document.
 ///
@@ -214,7 +254,7 @@ impl FenceTracker {
     pub fn new() -> Self {
         Self {
             in_fence: false,
-            fence_lang: Language::Markdown,
+            fence_lang: LANG_MARKDOWN,
             fence_char: '`',
             fence_count: 0,
         }
@@ -230,30 +270,29 @@ impl FenceTracker {
                 self.fence_char = fc;
                 self.fence_count = count;
                 self.fence_lang = lang;
-                return Language::Markdown; // fence line itself
+                return LANG_MARKDOWN; // fence line itself
             }
-            Language::Markdown
+            LANG_MARKDOWN
+        } else if is_fence_close(trimmed, self.fence_char, self.fence_count) {
+            self.in_fence = false;
+            LANG_MARKDOWN // closing fence
         } else {
-            if is_fence_close(trimmed, self.fence_char, self.fence_count) {
-                self.in_fence = false;
-                Language::Markdown // closing fence
-            } else {
-                self.fence_lang
-            }
+            self.fence_lang.clone()
         }
     }
 }
 
 /// Compute the effective highlight language for each line of a markdown document.
 ///
-/// When `base_language` is `Language::Markdown`, this detects fenced code blocks
-/// (lines starting with ``` or ~~~) and returns the appropriate embedded language
-/// for lines inside those blocks. Fence lines themselves stay as Markdown.
+/// When `base_language` is markdown (i.e. `base_language.name() == "markdown"`),
+/// this detects fenced code blocks (lines starting with ``` or ~~~) and returns
+/// the appropriate embedded language for lines inside those blocks. Fence lines
+/// themselves stay as markdown.
 ///
 /// For any other `base_language`, every line simply gets that language.
-pub fn line_languages(lines: &[(usize, String)], base_language: Language) -> Vec<Language> {
-    if base_language != Language::Markdown {
-        return vec![base_language; lines.len()];
+pub fn line_languages(lines: &[(usize, String)], base_language: &Language) -> Vec<Language> {
+    if base_language.name() != "markdown" {
+        return vec![base_language.clone(); lines.len()];
     }
 
     let mut tracker = FenceTracker::new();
@@ -279,7 +318,7 @@ fn detect_fence_open(trimmed: &str) -> Option<(char, usize, Language)> {
     }
 
     let lang = if info.is_empty() {
-        Language::Plain
+        Language::PLAIN
     } else {
         language_from_info_string(info)
     };
@@ -313,11 +352,15 @@ mod tests {
         texts.iter().enumerate().map(|(i, t)| (i, t.to_string())).collect()
     }
 
+    fn lang(name: &'static str) -> Language {
+        Language::new_static(name)
+    }
+
     #[test]
     fn sql_keywords_highlighted_on_all_lines() {
         // Multi-line SQL: keywords on lines 2+ must be highlighted via block parsing
         let lines = vec!["SELECT *", "FROM users", "WHERE id = 1"];
-        let highlighted = highlight_block(&lines, Language::Sql);
+        let highlighted = highlight_block(&lines, &lang("sql"));
 
         assert_eq!(highlighted.len(), 3);
 
@@ -346,7 +389,7 @@ mod tests {
         // 4 lines where the last is empty — this is common when the buffer
         // ends with a newline (ropey represents it as an extra empty line)
         let lines = vec!["SELECT *", "FROM users", "WHERE id = 1", ""];
-        let highlighted = highlight_block(&lines, Language::Sql);
+        let highlighted = highlight_block(&lines, &lang("sql"));
         assert_eq!(
             highlighted.len(),
             4,
@@ -359,7 +402,7 @@ mod tests {
     #[test]
     fn highlight_block_single_line() {
         let lines = vec!["SELECT * FROM users"];
-        let highlighted = highlight_block(&lines, Language::Sql);
+        let highlighted = highlight_block(&lines, &lang("sql"));
         assert_eq!(highlighted.len(), 1);
         assert!(highlighted[0].contains("<a-"), "Should have highlight tags");
     }
@@ -367,7 +410,7 @@ mod tests {
     #[test]
     fn highlight_block_empty_lines() {
         let lines = vec!["SELECT *", "", "FROM users"];
-        let highlighted = highlight_block(&lines, Language::Sql);
+        let highlighted = highlight_block(&lines, &lang("sql"));
         assert_eq!(highlighted.len(), 3);
         assert_eq!(highlighted[1], "", "Empty line should produce empty string");
     }
@@ -384,15 +427,15 @@ mod tests {
             "",
             "Some text",
         ]);
-        let langs = line_languages(&lines, Language::Markdown);
-        assert_eq!(langs[0], Language::Markdown); // heading
-        assert_eq!(langs[1], Language::Markdown); // blank
-        assert_eq!(langs[2], Language::Markdown); // fence open
-        assert_eq!(langs[3], Language::Yaml);     // chartml content
-        assert_eq!(langs[4], Language::Yaml);     // chartml content
-        assert_eq!(langs[5], Language::Markdown); // fence close
-        assert_eq!(langs[6], Language::Markdown); // blank
-        assert_eq!(langs[7], Language::Markdown); // text
+        let langs = line_languages(&lines, &lang("markdown"));
+        assert_eq!(langs[0], lang("markdown")); // heading
+        assert_eq!(langs[1], lang("markdown")); // blank
+        assert_eq!(langs[2], lang("markdown")); // fence open
+        assert_eq!(langs[3], lang("yaml"));     // chartml content
+        assert_eq!(langs[4], lang("yaml"));     // chartml content
+        assert_eq!(langs[5], lang("markdown")); // fence close
+        assert_eq!(langs[6], lang("markdown")); // blank
+        assert_eq!(langs[7], lang("markdown")); // text
     }
 
     #[test]
@@ -402,10 +445,10 @@ mod tests {
             "key: value",
             "```",
         ]);
-        let langs = line_languages(&lines, Language::Markdown);
-        assert_eq!(langs[0], Language::Markdown);
-        assert_eq!(langs[1], Language::Yaml);
-        assert_eq!(langs[2], Language::Markdown);
+        let langs = line_languages(&lines, &lang("markdown"));
+        assert_eq!(langs[0], lang("markdown"));
+        assert_eq!(langs[1], lang("yaml"));
+        assert_eq!(langs[2], lang("markdown"));
     }
 
     #[test]
@@ -415,8 +458,8 @@ mod tests {
             "SELECT * FROM users",
             "```",
         ]);
-        let langs = line_languages(&lines, Language::Markdown);
-        assert_eq!(langs[1], Language::Sql);
+        let langs = line_languages(&lines, &lang("markdown"));
+        assert_eq!(langs[1], lang("sql"));
     }
 
     #[test]
@@ -426,10 +469,10 @@ mod tests {
             "type: bar",
             "```",
         ]);
-        let langs = line_languages(&lines, Language::Sql);
-        assert_eq!(langs[0], Language::Sql);
-        assert_eq!(langs[1], Language::Sql);
-        assert_eq!(langs[2], Language::Sql);
+        let langs = line_languages(&lines, &lang("sql"));
+        assert_eq!(langs[0], lang("sql"));
+        assert_eq!(langs[1], lang("sql"));
+        assert_eq!(langs[2], lang("sql"));
     }
 
     #[test]
@@ -439,8 +482,8 @@ mod tests {
             "type: bar",
             "~~~",
         ]);
-        let langs = line_languages(&lines, Language::Markdown);
-        assert_eq!(langs[1], Language::Yaml);
+        let langs = line_languages(&lines, &lang("markdown"));
+        assert_eq!(langs[1], lang("yaml"));
     }
 
     #[test]
@@ -450,17 +493,37 @@ mod tests {
             "some content",
             "```",
         ]);
-        let langs = line_languages(&lines, Language::Markdown);
-        assert_eq!(langs[1], Language::Plain);
+        let langs = line_languages(&lines, &lang("markdown"));
+        assert_eq!(langs[1], Language::PLAIN);
     }
 
     #[test]
     fn language_from_info_string_chartml() {
-        assert_eq!(language_from_info_string("chartml"), Language::Yaml);
-        assert_eq!(language_from_info_string("ChartML"), Language::Yaml);
-        assert_eq!(language_from_info_string("CHARTML"), Language::Yaml);
-        assert_eq!(language_from_info_string("yaml"), Language::Yaml);
-        assert_eq!(language_from_info_string("sql"), Language::Sql);
-        assert_eq!(language_from_info_string("unknown"), Language::Plain);
+        assert_eq!(language_from_info_string("chartml"), lang("yaml"));
+        assert_eq!(language_from_info_string("ChartML"), lang("yaml"));
+        assert_eq!(language_from_info_string("CHARTML"), lang("yaml"));
+        assert_eq!(language_from_info_string("yaml"), lang("yaml"));
+        assert_eq!(language_from_info_string("sql"), lang("sql"));
+        assert_eq!(language_from_info_string("unknown"), Language::PLAIN);
+    }
+
+    #[test]
+    fn language_plain_is_plain() {
+        assert!(Language::PLAIN.is_plain());
+        assert_eq!(Language::PLAIN.name(), "");
+    }
+
+    #[test]
+    fn language_from_string_owned() {
+        let s = "sql".to_string();
+        let l = Language::from(s);
+        assert_eq!(l.name(), "sql");
+        assert!(!l.is_plain());
+    }
+
+    #[test]
+    fn language_from_static_str() {
+        let l: Language = "markdown".into();
+        assert_eq!(l.name(), "markdown");
     }
 }

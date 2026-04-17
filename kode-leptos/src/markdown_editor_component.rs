@@ -73,7 +73,7 @@ pub fn MarkdownEditorComponent(
                             let cb = on_change_source.clone();
                             view! {
                                 <CodeEditor
-                                    language=Signal::stored(Language::Markdown)
+                                    language=Signal::stored(Language::new_static("markdown"))
                                     content=content
                                     on_change=cb
                                     theme=theme
