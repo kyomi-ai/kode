@@ -13,7 +13,7 @@ readme.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-kode-core = { path = "../kode-core", version = "0.1.0" }
+kode-core = { path = "../kode-core", version = "0.2.0" }
 arborium-tree-sitter = "2.16"
 arborium-markdown = "2.16"
 

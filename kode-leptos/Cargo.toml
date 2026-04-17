@@ -13,9 +13,9 @@ readme.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-kode-core = { path = "../kode-core", version = "0.1.0" }
-kode-doc = { path = "../kode-doc", version = "0.1.0" }
-kode-markdown = { path = "../kode-markdown", version = "0.1.0" }
+kode-core = { path = "../kode-core", version = "0.2.0" }
+kode-doc = { path = "../kode-doc", version = "0.2.0" }
+kode-markdown = { path = "../kode-markdown", version = "0.2.0" }
 arborium-tree-sitter = "2.16"
 leptos = { version = "0.8", features = ["csr"] }
 # Consumers must enable the languages they need via their own `arborium` dep,
