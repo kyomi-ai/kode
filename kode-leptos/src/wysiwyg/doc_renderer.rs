@@ -216,7 +216,7 @@ pub(crate) fn render_block_node(
             let highlight_lang = match_language(lang, language_aliases);
             let highlighted_lines: Vec<String> = content_text
                 .lines()
-                .map(|line| highlight::highlight_line(line, highlight_lang))
+                .map(|line| highlight::highlight_line(line, &highlight_lang))
                 .collect();
             let mut code_html = highlighted_lines.join("\n");
             // A trailing \n in <pre> doesn't render a visible blank line
@@ -957,14 +957,18 @@ mod tests {
 
     // ── Language alias tests ────────────────────────────────────────
 
+    fn lang(name: &'static str) -> Language {
+        Language::new_static(name)
+    }
+
     #[test]
     fn match_language_builtin() {
-        assert_eq!(match_language("sql", &[]), Language::Sql);
-        assert_eq!(match_language("yaml", &[]), Language::Yaml);
-        assert_eq!(match_language("yml", &[]), Language::Yaml);
-        assert_eq!(match_language("chartml", &[]), Language::Yaml);
-        assert_eq!(match_language("markdown", &[]), Language::Markdown);
-        assert_eq!(match_language("unknown", &[]), Language::Plain);
+        assert_eq!(match_language("sql", &[]), lang("sql"));
+        assert_eq!(match_language("yaml", &[]), lang("yaml"));
+        assert_eq!(match_language("yml", &[]), lang("yaml"));
+        assert_eq!(match_language("chartml", &[]), lang("yaml"));
+        assert_eq!(match_language("markdown", &[]), lang("markdown"));
+        assert_eq!(match_language("unknown", &[]), Language::PLAIN);
     }
 
     #[test]
@@ -973,26 +977,26 @@ mod tests {
             ("chartml".to_string(), "yaml".to_string()),
             ("hcl".to_string(), "sql".to_string()),
         ];
-        assert_eq!(match_language("chartml", &aliases), Language::Yaml);
-        assert_eq!(match_language("hcl", &aliases), Language::Sql);
+        assert_eq!(match_language("chartml", &aliases), lang("yaml"));
+        assert_eq!(match_language("hcl", &aliases), lang("sql"));
         // Built-in still works
-        assert_eq!(match_language("sql", &aliases), Language::Sql);
+        assert_eq!(match_language("sql", &aliases), lang("sql"));
         // Known language resolves directly
-        assert_eq!(match_language("python", &aliases), Language::Python);
+        assert_eq!(match_language("python", &aliases), lang("python"));
         // Unknown stays plain
-        assert_eq!(match_language("brainfuck", &aliases), Language::Plain);
+        assert_eq!(match_language("brainfuck", &aliases), Language::PLAIN);
     }
 
     #[test]
     fn match_language_alias_case_insensitive_key() {
         let aliases = vec![("chartml".to_string(), "yaml".to_string())];
-        assert_eq!(match_language("ChartML", &aliases), Language::Yaml);
-        assert_eq!(match_language("CHARTML", &aliases), Language::Yaml);
+        assert_eq!(match_language("ChartML", &aliases), lang("yaml"));
+        assert_eq!(match_language("CHARTML", &aliases), lang("yaml"));
     }
 
     #[test]
     fn match_language_alias_case_insensitive_target() {
         let aliases = vec![("chartml".to_string(), "YAML".to_string())];
-        assert_eq!(match_language("chartml", &aliases), Language::Yaml);
+        assert_eq!(match_language("chartml", &aliases), lang("yaml"));
     }
 }

@@ -16,5 +16,14 @@ console_log = "1"
 console_error_panic_hook = "0.1"
 log = "0.4"
 
+# The demo showcases every language, so it opts in to all arborium grammars.
+# Consumers of kode-leptos only need to enable the languages they actually use.
+arborium = { version = "2.16", default-features = false, features = [
+    "lang-sql", "lang-yaml", "lang-markdown",
+    "lang-javascript", "lang-typescript", "lang-python", "lang-rust",
+    "lang-go", "lang-html", "lang-css", "lang-json",
+    "lang-bash", "lang-c", "lang-cpp", "lang-java",
+] }
+
 [lints]
 workspace = true

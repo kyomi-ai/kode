@@ -49,7 +49,7 @@ fn App() -> impl IntoView {
     let (theme, set_theme) = signal(Theme::tokyo_night());
 
     // ── Code editor state ────────────────────────────────────────
-    let (language, set_language) = signal(Language::Sql);
+    let (language, set_language) = signal(Language::new_static("sql"));
 
     let sql_sample = "SELECT\n  u.id,\n  u.name,\n  u.email,\n  COUNT(o.id) AS order_count,\n  SUM(o.total) AS total_spent\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE u.created_at >= '2025-01-01'\n  AND u.status = 'active'\nGROUP BY u.id, u.name, u.email\nHAVING COUNT(o.id) > 0\nORDER BY total_spent DESC\nLIMIT 100;";
 
@@ -60,25 +60,25 @@ fn App() -> impl IntoView {
     let (selection_text, set_selection_text) = signal(String::new());
 
     let on_lang_change = move |lang: Language| {
-        set_language.set(lang);
-        let sample = match lang {
-            Language::Sql => sql_sample,
-            Language::Yaml => yaml_sample,
-            Language::Markdown => "# Markdown\n\nUse the **Markdown Editor** tab instead.",
-            Language::JavaScript => "function greet(name) {\n  console.log(`Hello, ${name}!`);\n}\n\ngreet('world');",
-            Language::TypeScript => "interface User {\n  name: string;\n  age: number;\n}\n\nfunction greet(user: User): string {\n  return `Hello, ${user.name}!`;\n}",
-            Language::Python => "def fibonacci(n: int) -> list[int]:\n    a, b = 0, 1\n    result = []\n    for _ in range(n):\n        result.append(a)\n        a, b = b, a + b\n    return result\n\nprint(fibonacci(10))",
-            Language::Rust => "fn main() {\n    let items: Vec<&str> = vec![\"hello\", \"world\"];\n    for item in &items {\n        println!(\"{item}\");\n    }\n}",
-            Language::Go => "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}",
-            Language::Html => "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>Hello</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n</body>\n</html>",
-            Language::Css => "body {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background: #1a1b26;\n  color: #a9b1d6;\n}",
-            Language::Json => "{\n  \"name\": \"kode\",\n  \"version\": \"0.2.0\",\n  \"features\": [\"syntax-highlighting\", \"themes\", \"wysiwyg\"]\n}",
-            Language::Bash => "#!/bin/bash\nset -euo pipefail\n\nfor file in *.rs; do\n  echo \"Checking $file\"\n  cargo check\ndone",
-            Language::C => "#include <stdio.h>\n\nint main(void) {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}",
-            Language::Cpp => "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> v = {1, 2, 3};\n    for (auto x : v) {\n        std::cout << x << std::endl;\n    }\n}",
-            Language::Java => "public class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}",
-            Language::Plain => "Hello, world!",
+        let sample = match lang.name() {
+            "sql" => sql_sample,
+            "yaml" => yaml_sample,
+            "markdown" => "# Markdown\n\nUse the **Markdown Editor** tab instead.",
+            "javascript" => "function greet(name) {\n  console.log(`Hello, ${name}!`);\n}\n\ngreet('world');",
+            "typescript" => "interface User {\n  name: string;\n  age: number;\n}\n\nfunction greet(user: User): string {\n  return `Hello, ${user.name}!`;\n}",
+            "python" => "def fibonacci(n: int) -> list[int]:\n    a, b = 0, 1\n    result = []\n    for _ in range(n):\n        result.append(a)\n        a, b = b, a + b\n    return result\n\nprint(fibonacci(10))",
+            "rust" => "fn main() {\n    let items: Vec<&str> = vec![\"hello\", \"world\"];\n    for item in &items {\n        println!(\"{item}\");\n    }\n}",
+            "go" => "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}",
+            "html" => "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>Hello</title>\n</head>\n<body>\n  <h1>Hello, World!</h1>\n</body>\n</html>",
+            "css" => "body {\n  font-family: system-ui, sans-serif;\n  margin: 0;\n  padding: 2rem;\n  background: #1a1b26;\n  color: #a9b1d6;\n}",
+            "json" => "{\n  \"name\": \"kode\",\n  \"version\": \"0.2.0\",\n  \"features\": [\"syntax-highlighting\", \"themes\", \"wysiwyg\"]\n}",
+            "bash" => "#!/bin/bash\nset -euo pipefail\n\nfor file in *.rs; do\n  echo \"Checking $file\"\n  cargo check\ndone",
+            "c" => "#include <stdio.h>\n\nint main(void) {\n    printf(\"Hello, World!\\n\");\n    return 0;\n}",
+            "cpp" => "#include <iostream>\n#include <vector>\n\nint main() {\n    std::vector<int> v = {1, 2, 3};\n    for (auto x : v) {\n        std::cout << x << std::endl;\n    }\n}",
+            "java" => "public class Hello {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}",
+            _ => "Hello, world!",
         };
+        set_language.set(lang);
         set_code_content.set(sample.to_string());
     };
 
@@ -244,24 +244,25 @@ fn App() -> impl IntoView {
                         <div>
                             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                                 {[
-                                    ("SQL", Language::Sql),
-                                    ("YAML", Language::Yaml),
-                                    ("JS", Language::JavaScript),
-                                    ("TS", Language::TypeScript),
-                                    ("Python", Language::Python),
-                                    ("Rust", Language::Rust),
-                                    ("Go", Language::Go),
-                                    ("HTML", Language::Html),
-                                    ("CSS", Language::Css),
-                                    ("JSON", Language::Json),
-                                    ("Bash", Language::Bash),
-                                    ("C", Language::C),
-                                    ("C++", Language::Cpp),
-                                    ("Java", Language::Java),
-                                    ("Plain", Language::Plain),
+                                    ("SQL", Language::new_static("sql")),
+                                    ("YAML", Language::new_static("yaml")),
+                                    ("JS", Language::new_static("javascript")),
+                                    ("TS", Language::new_static("typescript")),
+                                    ("Python", Language::new_static("python")),
+                                    ("Rust", Language::new_static("rust")),
+                                    ("Go", Language::new_static("go")),
+                                    ("HTML", Language::new_static("html")),
+                                    ("CSS", Language::new_static("css")),
+                                    ("JSON", Language::new_static("json")),
+                                    ("Bash", Language::new_static("bash")),
+                                    ("C", Language::new_static("c")),
+                                    ("C++", Language::new_static("cpp")),
+                                    ("Java", Language::new_static("java")),
+                                    ("Plain", Language::PLAIN),
                                 ].into_iter().map(|(label, lang)| {
-                                    let is_active = move || language.get() == lang;
-                                    let on_click = move |_| on_lang_change(lang);
+                                    let lang_for_active = lang.clone();
+                                    let is_active = move || language.get() == lang_for_active;
+                                    let on_click = move |_| on_lang_change(lang.clone());
                                     view! {
                                         <button
                                             on:click=on_click
@@ -276,7 +277,7 @@ fn App() -> impl IntoView {
 
                                 {[100, 500, 1000, 5000].into_iter().map(|n| {
                                     let on_click = move |_| {
-                                        set_language.set(Language::Sql);
+                                        set_language.set(Language::new_static("sql"));
                                         set_code_content.set(generate_large_sql(n));
                                     };
                                     view! {

@@ -1166,6 +1166,7 @@ dependencies = [
 name = "kode-demo"
 version = "0.1.0"
 dependencies = [
+ "arborium",
  "console_error_panic_hook",
  "console_log",
  "kode-leptos",
