@@ -32,7 +32,6 @@ a toolkit of building blocks for editor experiences that feel native to the web.
 | `kode-doc` | Structured document model (used by the WYSIWYG tree editor). |
 | `kode` | Re-exports and shared API surface. |
 | `demo` | Trunk-built SPA showing the full API in action. |
-| `spike` | Experimental integration sketches. |
 
 ## Installation
 
@@ -332,8 +331,7 @@ kode/
 ├── kode-markdown/       # markdown parser
 ├── kode-doc/            # document tree model
 ├── kode/                # umbrella re-exports
-├── demo/                # Trunk SPA demo
-└── spike/               # integration experiments
+└── demo/                # Trunk SPA demo
 ```
 
 ## License

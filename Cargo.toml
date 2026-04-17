@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "kode-doc","kode-core", "kode-markdown", "kode-leptos", "kode", "demo", "spike"]
+    "kode-doc","kode-core", "kode-markdown", "kode-leptos", "kode", "demo"]
 
 [workspace.lints]

@@ -1251,15 +1251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kode-spike"
-version = "0.1.0"
-dependencies = [
- "arborium",
- "editor-core",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
