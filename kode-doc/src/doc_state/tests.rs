@@ -76,10 +76,14 @@ mod main_tests {
     }
 
     #[test]
-    fn from_doc_empty_doc_cursor_at_zero() {
+    fn from_doc_empty_doc_gets_default_paragraph() {
+        // An empty doc is bootstrapped to have one empty paragraph, so the
+        // cursor lands at pos 1 (inside the paragraph), not pos 0.
         let doc = Node::branch(NodeType::Doc, Fragment::empty());
         let state = DocState::from_doc(doc);
-        assert_eq!(state.selection, Selection::cursor(0));
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.selection, Selection::cursor(1));
     }
 
     // ── to_markdown round-trip ─────────────────────────────────────────
@@ -144,11 +148,11 @@ mod main_tests {
 
     #[test]
     fn insert_text_into_empty_doc() {
-        // Empty document: Doc[] with cursor at 0.
-        // Typing should bootstrap a paragraph and insert text.
+        // from_doc bootstraps an empty paragraph, so cursor starts at 1.
+        // Typing inserts into that paragraph.
         let doc = Node::branch(NodeType::Doc, Fragment::empty());
         let mut state = DocState::from_doc(doc);
-        assert_eq!(state.selection, Selection::cursor(0));
+        assert_eq!(state.selection, Selection::cursor(1));
 
         state.insert_text("Hello");
 
@@ -169,6 +173,15 @@ mod main_tests {
         assert_eq!(state.doc.child_count(), 1);
         assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
         assert_eq!(state.doc.child(0).text_content(), "Hi");
+    }
+
+    #[test]
+    fn empty_doc_has_default_paragraph() {
+        let state = DocState::from_markdown("");
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "");
+        assert_eq!(state.selection, Selection::cursor(1));
     }
 
     // ── backspace tests ────────────────────────────────────────────────

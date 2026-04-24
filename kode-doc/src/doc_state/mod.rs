@@ -19,9 +19,32 @@ mod undo;
 #[cfg(test)]
 mod tests;
 
+use crate::fragment::Fragment;
 use crate::node::Node;
+use crate::node_type::NodeType;
 use crate::parse::parse_markdown;
 use crate::serialize::serialize_markdown;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/// Ensure the document has at least one block child.
+///
+/// An empty `Doc` has no valid cursor position for the editor, so we
+/// always bootstrap one empty `Paragraph` — matching ProseMirror's
+/// invariant that every document must contain at least one block node.
+///
+/// This is applied at the **editor layer** (`DocState`), not in the
+/// parser, so the parser can still faithfully represent an empty input.
+fn ensure_min_content(doc: Node) -> Node {
+    if doc.child_count() == 0 {
+        Node::branch(
+            NodeType::Doc,
+            Fragment::from_node(Node::branch(NodeType::Paragraph, Fragment::empty())),
+        )
+    } else {
+        doc
+    }
+}
 
 // ── Selection ──────────────────────────────────────────────────────────────
 
@@ -130,13 +153,14 @@ impl DocState {
 
     /// Create from an existing document tree.
     ///
-    /// The cursor is placed at position 1 (inside the first textblock) when
-    /// the document is non-empty, or position 0 when it is empty.
+    /// If the document has no children, a single empty `Paragraph` is
+    /// inserted so the editor always has a valid cursor home. The cursor
+    /// is placed at position 1 (inside the first textblock).
     pub fn from_doc(doc: Node) -> Self {
-        let start_pos = if doc.content.size() > 0 { 1 } else { 0 };
+        let doc = ensure_min_content(doc);
         DocState {
             doc,
-            selection: Selection::cursor(start_pos),
+            selection: Selection::cursor(1),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }
@@ -173,9 +197,8 @@ impl DocState {
     /// Source mode).
     pub fn set_from_markdown(&mut self, markdown: &str) {
         self.push_undo();
-        self.doc = parse_markdown(markdown);
-        let start_pos = if self.doc.content.size() > 0 { 1 } else { 0 };
-        self.selection = Selection::cursor(start_pos);
+        self.doc = ensure_min_content(parse_markdown(markdown));
+        self.selection = Selection::cursor(1);
         self.redo_stack.clear();
     }
 }
