@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use kode_doc::mark::MarkType;
 
-use kode_doc::{DocState, FormattingState, Selection};
+use kode_doc::{DocState, FormattingState, NodeType, Selection};
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::AnyView;
 use wasm_bindgen::closure::Closure;
@@ -48,6 +48,8 @@ struct BlockItem {
     node: Node,
     /// Absolute token position in the document.
     position: usize,
+    /// True for synthetic gap items inserted between adjacent code blocks.
+    is_gap: bool,
 }
 
 impl PartialEq for BlockItem {
@@ -60,14 +62,29 @@ impl PartialEq for BlockItem {
 fn extract_block_items(doc: &Node) -> Vec<BlockItem> {
     let mut items = Vec::new();
     let mut pos = 0; // content_start = 0 (matches render_doc's convention)
-    for (i, child) in doc.content.iter().enumerate() {
+    let children: Vec<&Node> = doc.content.iter().collect();
+    for (i, child) in children.iter().enumerate() {
         let hash = hash_node_content(child);
         items.push(BlockItem {
             key: (i, hash),
-            node: child.clone(),
+            node: (*child).clone(),
             position: pos,
+            is_gap: false,
         });
         pos += child.node_size();
+
+        if child.node_type == NodeType::CodeBlock {
+            if let Some(next) = children.get(i + 1) {
+                if next.node_type == NodeType::CodeBlock {
+                    items.push(BlockItem {
+                        key: (i, u64::MAX),
+                        node: Node::leaf(NodeType::HorizontalRule),
+                        position: pos,
+                        is_gap: true,
+                    });
+                }
+            }
+        }
     }
     items
 }
@@ -1048,6 +1065,13 @@ pub fn TreeWysiwygEditor(
             let mut expected_pos = 0usize; // content_start = 0 (matches render_doc)
             let mut child = container_el.first_element_child();
             for block in doc.content.iter() {
+                while let Some(el) = child.as_ref() {
+                    if el.class_list().contains("kode-block-gap") {
+                        child = el.next_element_sibling();
+                    } else {
+                        break;
+                    }
+                }
                 let Some(el) = child.as_ref() else { break };
                 let content_start = expected_pos + 1;
                 // Read the current (possibly stale) pos from the DOM.
@@ -1527,12 +1551,21 @@ pub fn TreeWysiwygEditor(
                             let:block
                         >
                             {
-                                let exts = Arc::clone(&extensions_for_render);
-                                let aliases = Arc::clone(&aliases_for_render);
-                                for ext in exts.iter() {
-                                    ext.begin_render_pass();
+                                if block.is_gap {
+                                    let gap_pos = block.position;
+                                    Some(view! {
+                                        <div class="kode-block-gap"
+                                            data-pos-start=gap_pos
+                                            data-pos-end=gap_pos />
+                                    }.into_any())
+                                } else {
+                                    let exts = Arc::clone(&extensions_for_render);
+                                    let aliases = Arc::clone(&aliases_for_render);
+                                    for ext in exts.iter() {
+                                        ext.begin_render_pass();
+                                    }
+                                    render_block_node(&block.node, block.position, &exts, &aliases)
                                 }
-                                render_block_node(&block.node, block.position, &exts, &aliases)
                             }
                         </For>
                     }.into_any()
