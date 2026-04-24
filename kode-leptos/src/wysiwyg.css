@@ -418,6 +418,20 @@
     min-height: 1.4em;
 }
 
+/* ── Block gap (between adjacent code blocks) ─────────────────────── */
+
+.kode-block-gap {
+    height: var(--kode-block-gap-height, 8px);
+    cursor: text;
+    position: relative;
+    border-radius: 2px;
+    transition: background var(--kode-transition-duration, 0.15s) ease;
+}
+
+.kode-block-gap:hover {
+    background: var(--kode-block-gap-hover-bg, var(--kode-bg-hover, rgba(127, 127, 127, 0.1)));
+}
+
 /* ── Tables ────────────────────────────────────────────────────────── */
 
 .wysiwyg-table {

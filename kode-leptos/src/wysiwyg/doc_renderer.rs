@@ -55,11 +55,31 @@ fn render_block_children(
     let mut views = Vec::new();
     let mut pos = content_start;
 
-    for child in content.iter() {
+    let children: Vec<&Node> = content.iter().collect();
+    for (i, child) in children.iter().enumerate() {
         if let Some(v) = render_block_node(child, pos, extensions, language_aliases) {
             views.push(v);
         }
         pos += child.node_size();
+
+        // Insert a click-target gap between adjacent code blocks so users
+        // have somewhere to position the cursor for text insertion between
+        // two consecutive chart/code blocks.
+        if child.node_type == NodeType::CodeBlock {
+            if let Some(next) = children.get(i + 1) {
+                if next.node_type == NodeType::CodeBlock {
+                    let gap_pos = pos;
+                    views.push(
+                        view! {
+                            <div class="kode-block-gap"
+                                data-pos-start=gap_pos
+                                data-pos-end=gap_pos />
+                        }
+                        .into_any(),
+                    );
+                }
+            }
+        }
     }
 
     views
