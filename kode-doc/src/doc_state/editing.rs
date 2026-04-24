@@ -29,36 +29,47 @@ impl DocState {
             return;
         }
 
-        let raw_from = self.selection.from();
-        let raw_to = self.selection.to();
-        let from = self.adjust_into_textblock(raw_from);
-        let to = self.adjust_into_textblock(raw_to);
+        let from = self.adjust_into_textblock(self.selection.from());
+        let to = self.adjust_into_textblock(self.selection.to());
 
-        // If adjust_into_textblock moved the cursor from a boundary position
-        // into a CodeBlock, that means the cursor was between two blocks and
-        // the adjustment pushed it into the adjacent code block's content.
-        // In that case, insert a new paragraph at the boundary position
-        // instead of corrupting the code block with typed text.
-        let (from, to) = if from != raw_from
-            && self.doc.resolve(from).parent().node_type == NodeType::CodeBlock
-        {
+        // Detect cursor at the end of a CodeBlock whose next sibling is also
+        // a CodeBlock. set_selection normalises boundary positions into the
+        // preceding textblock, so by the time we get here the cursor is
+        // already inside the CodeBlock content — we can't rely on comparing
+        // raw vs adjusted positions.
+        let resolved = self.doc.resolve(from);
+        let needs_gap_paragraph = resolved.parent().node_type == NodeType::CodeBlock
+            && resolved.parent_offset == resolved.parent().content.size()
+            && resolved.depth > 0
+            && {
+                let idx = resolved.index(resolved.depth - 1);
+                let gp = resolved.node(resolved.depth - 1);
+                idx + 1 < gp.child_count()
+                    && gp.child(idx + 1).node_type == NodeType::CodeBlock
+            };
+        let insert_pos = if needs_gap_paragraph {
+            Some(resolved.after(resolved.depth))
+        } else {
+            None
+        };
+        drop(resolved);
+
+        let (from, to) = if let Some(pos) = insert_pos {
             let new_p = Node::branch(NodeType::Paragraph, Fragment::empty());
             let mut tr = Transform::new(self.doc.clone());
-            if tr.insert(raw_from, Fragment::from_node(new_p)).is_ok() {
+            if tr.insert(pos, Fragment::from_node(new_p)).is_ok() {
                 self.doc = tr.doc;
-                let inside = raw_from + 1;
+                let inside = pos + 1;
                 (inside, inside)
             } else {
                 return;
             }
         } else if !self.doc.resolve(from).parent().node_type.is_textblock() {
-            // If the cursor is still not inside a textblock (e.g. empty document),
-            // bootstrap an empty paragraph first so text has a valid home.
             let new_p = Node::branch(NodeType::Paragraph, Fragment::empty());
             let mut tr = Transform::new(self.doc.clone());
             if tr.insert(from, Fragment::from_node(new_p)).is_ok() {
                 self.doc = tr.doc;
-                let inside = from + 1; // position inside the new paragraph
+                let inside = from + 1;
                 (inside, inside)
             } else {
                 return;

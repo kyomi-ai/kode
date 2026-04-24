@@ -1526,4 +1526,59 @@ mod paste_replace_test {
         // Should have "Dashboard" twice (or at least "DashboardDashboard")
         assert!(h1_text.len() > 9, "Should be longer than just 'Dashboard', got: {}", h1_text);
     }
+
+    #[test]
+    fn insert_text_between_two_code_blocks_creates_paragraph() {
+        // Two adjacent code blocks simulating chartml blocks
+        let cb1 = Node::branch(
+            NodeType::CodeBlock,
+            Fragment::from_node(Node::new_text("title: Revenue Chart\ntype: bar")),
+        );
+        let cb2 = Node::branch(
+            NodeType::CodeBlock,
+            Fragment::from_node(Node::new_text("title: Users Chart\ntype: line")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+
+        let boundary = doc.child(0).node_size(); // position right after first code block
+        eprintln!("cb1 node_size={}, boundary pos={}", doc.child(0).node_size(), boundary);
+
+        let mut state = DocState::from_doc(doc);
+        state.set_selection(Selection::cursor(boundary));
+        eprintln!("Selection at: {}", state.selection().from());
+
+        // Trace adjust_into_textblock
+        let adjusted = state.adjust_into_textblock(boundary);
+        eprintln!("adjust_into_textblock({}) = {}", boundary, adjusted);
+        let resolved_adj = state.doc().resolve(adjusted);
+        eprintln!("resolve({}).parent().node_type = {:?}", adjusted, resolved_adj.parent().node_type);
+
+        // Now insert text
+        state.insert_text("X");
+
+        let md = state.to_markdown();
+        eprintln!("Markdown after insert:\n{}", md);
+        eprintln!("Doc child count: {}", state.doc().child_count());
+        for i in 0..state.doc().child_count() {
+            let child = state.doc().child(i);
+            eprintln!("  child[{}]: {:?}, text_content={:?}", i, child.node_type, child.text_content());
+        }
+
+        // The first code block's content should be unchanged
+        assert_eq!(
+            state.doc().child(0).text_content(),
+            "title: Revenue Chart\ntype: bar",
+            "First code block content should not be modified"
+        );
+        // There should be a new paragraph with "X" between the code blocks
+        assert_eq!(state.doc().child_count(), 3, "Should have 3 children: cb1, paragraph, cb2");
+        assert_eq!(state.doc().child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc().child(1).text_content(), "X");
+        // Second code block should be unchanged
+        assert_eq!(
+            state.doc().child(2).text_content(),
+            "title: Users Chart\ntype: line",
+            "Second code block content should not be modified"
+        );
+    }
 }
