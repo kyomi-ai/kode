@@ -152,7 +152,7 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
 
         "fenced_code_block" => {
             let lang = code_block_language(node, source).unwrap_or("");
-            let content = code_block_content(node, source).unwrap_or("");
+            let content = code_block_content(node, source).unwrap_or_default();
             let attrs = if lang.is_empty() {
                 empty_attrs()
             } else {
@@ -161,7 +161,7 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
             let children = if content.is_empty() {
                 vec![]
             } else {
-                vec![Node::new_text(content)]
+                vec![Node::new_text(&content)]
             };
             Some(Node::branch_with_attrs(
                 NodeType::CodeBlock,
@@ -377,18 +377,51 @@ fn code_block_language<'a>(
 }
 
 /// Extract the content of a fenced code block (without fences).
-fn code_block_content<'a>(
+///
+/// When a fenced code block appears at the very end of a document with no
+/// trailing newline after the closing fence (e.g. ` ```lang\ncontent\n``` `
+/// with no final `\n`), tree-sitter's markdown grammar absorbs the closing
+/// ` ``` ` characters into the `code_fence_content` node rather than
+/// recognising them as a `fenced_code_block_delimiter`. This function strips
+/// any such trailing fence sequence so callers always receive clean content
+/// free of stray backticks.
+fn code_block_content(
     node: &arborium_tree_sitter::Node,
-    source: &'a str,
-) -> Option<&'a str> {
+    source: &str,
+) -> Option<String> {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32)
             && child.kind() == "code_fence_content"
         {
-            return Some(&source[child.start_byte()..child.end_byte()]);
+            let raw = &source[child.start_byte()..child.end_byte()];
+            // Strip a trailing closing fence (` ``` `) that tree-sitter
+            // absorbed into the content node when the document ends without
+            // a newline after the closing fence.  The fence may consist of
+            // three or more backticks; we strip the longest trailing run.
+            let content = strip_trailing_fence(raw);
+            return Some(content.to_string());
         }
     }
     None
+}
+
+/// Strip a trailing code fence (three or more consecutive backticks at the
+/// start of the last line, optionally preceded by a newline) from content
+/// that tree-sitter has incorrectly absorbed into `code_fence_content`.
+///
+/// Returns the stripped content unchanged if no trailing fence is present.
+fn strip_trailing_fence(content: &str) -> &str {
+    // Find the last newline in the content. If the text after that newline
+    // consists entirely of backtick characters (and nothing else), it is a
+    // stray fence and must be removed together with the preceding newline.
+    if let Some(last_nl) = content.rfind('\n') {
+        let after_nl = &content[last_nl + 1..];
+        if !after_nl.is_empty() && after_nl.chars().all(|c| c == '`') {
+            // Everything from the last `\n` onward is a fence — strip it.
+            return &content[..last_nl + 1];
+        }
+    }
+    content
 }
 
 /// Detect the start number of an ordered list by parsing the first marker.
@@ -1405,5 +1438,126 @@ mod dunder_tests {
         let para = doc.child(0);
         // Should be literal text, not italic
         assert_eq!(para.text_content(), "_foo_bar_");
+    }
+
+}
+
+// ── Regression tests for code block content extraction ──────────────────────
+
+#[cfg(test)]
+mod code_fence_content_tests {
+    use super::*;
+
+    /// Regression test for KYO-220: when a fenced code block appears at the
+    /// very end of a document without a trailing newline after the closing
+    /// fence, tree-sitter absorbs the closing ` ``` ` into `code_fence_content`.
+    /// `strip_trailing_fence` must remove it so callers receive clean content.
+    #[test]
+    fn strip_trailing_fence_removes_backticks() {
+        assert_eq!(strip_trailing_fence("type: chart\n```"), "type: chart\n");
+        assert_eq!(strip_trailing_fence("type: chart\n"), "type: chart\n");
+        assert_eq!(strip_trailing_fence("type: chart"), "type: chart");
+        assert_eq!(strip_trailing_fence(""), "");
+        // Four backticks (longer fence) also stripped
+        assert_eq!(strip_trailing_fence("content\n````"), "content\n");
+        // Backtick not at start of last line — NOT stripped
+        assert_eq!(
+            strip_trailing_fence("foo: bar`\nbaz: qux"),
+            "foo: bar`\nbaz: qux"
+        );
+        // Only backticks in last "line" after a newline triggers the strip
+        assert_eq!(
+            strip_trailing_fence("line1\nline2\n```"),
+            "line1\nline2\n"
+        );
+    }
+
+    /// Regression test for KYO-220: chartml code block content must be clean
+    /// YAML (no trailing fence backticks) regardless of whether the markdown
+    /// has a trailing newline after the closing fence.
+    ///
+    /// This is the key scenario: the Visual mode editor's content sync effect
+    /// calls `serialize_markdown` which trims trailing whitespace and removes
+    /// the trailing `\n`. When `parse_markdown` re-ingests the trimmed form,
+    /// tree-sitter absorbs the closing ` ``` ` into `code_fence_content`.
+    /// Without the fix the WYSIWYG editor passes `"type: chart\n\`\`\`"` to
+    /// the chartml YAML parser, which fails with "found character that cannot
+    /// start any token at line 2 column 1".
+    #[test]
+    fn code_block_content_clean_without_trailing_newline() {
+        // The serializer produces this form (no trailing `\n` after the fence).
+        let md_no_newline = "```chartml\ntype: chart\nversion: 1\n```";
+        let doc = parse_markdown(md_no_newline);
+        assert_eq!(doc.child_count(), 1);
+        let code = doc.child(0);
+        assert_eq!(code.node_type, NodeType::CodeBlock);
+        let text = code.text_content();
+        assert!(
+            !text.contains('`'),
+            "content must not contain backticks, got: {:?}",
+            text
+        );
+        assert_eq!(text.trim(), "type: chart\nversion: 1");
+    }
+
+    /// With a trailing newline tree-sitter behaves correctly — verify we don't
+    /// accidentally break the normal case.
+    #[test]
+    fn code_block_content_clean_with_trailing_newline() {
+        let md_with_newline = "```chartml\ntype: chart\nversion: 1\n```\n";
+        let doc = parse_markdown(md_with_newline);
+        assert_eq!(doc.child_count(), 1);
+        let code = doc.child(0);
+        assert_eq!(code.node_type, NodeType::CodeBlock);
+        let text = code.text_content();
+        assert!(
+            !text.contains('`'),
+            "content must not contain backticks, got: {:?}",
+            text
+        );
+        assert_eq!(text.trim(), "type: chart\nversion: 1");
+    }
+
+    /// Parse → serialize → parse roundtrip must produce clean content.
+    /// Before the fix, the round-tripped content was `"type: chart\nversion: 1\n\`\`\`"`
+    /// because serialize drops the trailing `\n` and the re-parse absorbs the fence.
+    #[test]
+    fn chartml_roundtrip_produces_clean_content() {
+        let md = "```chartml\ntype: chart\nversion: 1\n```\n";
+        let doc = parse_markdown(md);
+        let serialized = crate::serialize::serialize_markdown(&doc);
+
+        // Serializer trims trailing whitespace — no trailing `\n` after fence.
+        assert_eq!(serialized, "```chartml\ntype: chart\nversion: 1\n```");
+
+        // Re-parse the serialized form — this is exactly what the editor's
+        // content sync effect does after calling `to_markdown()`.
+        let doc2 = parse_markdown(&serialized);
+        assert_eq!(doc2.child_count(), 1);
+        let code2 = doc2.child(0);
+        let text2 = code2.text_content();
+        assert!(
+            !text2.contains('`'),
+            "Round-tripped content must not contain backticks, got: {:?}",
+            text2
+        );
+        assert_eq!(text2.trim(), "type: chart\nversion: 1");
+    }
+
+    /// Multi-line YAML block must not include any fence on any line.
+    #[test]
+    fn chartml_multiline_excludes_fence() {
+        let md = "```chartml\ntype: chart\nversion: 1\ntitle: My Chart\ndata: sales\nvisualize:\n  type: bar\n  columns: month\n  rows: revenue\n```";
+        let doc = parse_markdown(md);
+        let code = doc.child(0);
+        let text = code.text_content();
+        for line in text.lines() {
+            assert!(
+                !line.starts_with("```"),
+                "No line should start with ```, line={:?}, content={:?}",
+                line,
+                text
+            );
+        }
     }
 }
