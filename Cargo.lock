@@ -1157,14 +1157,14 @@ dependencies = [
 
 [[package]]
 name = "kode-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ropey",
 ]
 
 [[package]]
 name = "kode-demo"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arborium",
  "console_error_panic_hook",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "kode-doc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arborium-markdown",
  "arborium-tree-sitter",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "kode-leptos"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arborium",
  "arborium-theme",
@@ -1209,7 +1209,7 @@ dependencies = [
 
 [[package]]
 name = "kode-markdown"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arborium-markdown",
  "arborium-tree-sitter",
