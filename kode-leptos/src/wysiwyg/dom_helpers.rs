@@ -1,8 +1,6 @@
 //! DOM utility functions for the tree-based WYSIWYG editor.
 //!
-//! Provides helpers for navigating the DOM tree to find elements with
-//! `data-pos-start`/`data-pos-end` attributes, parsing data attributes,
-//! and applying markdown commands via roundtrip.
+//! Provides helpers for applying markdown commands via roundtrip.
 
 use kode_doc::Selection;
 
@@ -10,7 +8,7 @@ use kode_doc::Selection;
 /// Serializes to markdown, creates a temporary MarkdownEditor, runs the command,
 /// then parses the result back into DocState if changed.
 /// Returns `true` if the document was modified.
-pub fn apply_md_command(
+pub(super) fn apply_md_command(
     ds: &mut kode_doc::DocState,
     f: impl FnOnce(&mut kode_markdown::MarkdownEditor),
 ) -> bool {
@@ -33,41 +31,4 @@ pub fn apply_md_command(
     } else {
         false
     }
-}
-
-/// Walk up the DOM from an element to find the nearest ancestor (or self)
-/// that has both `data-pos-start` and `data-pos-end` attributes.
-pub fn find_ancestor_with_pos_attrs(el: &web_sys::Element) -> Option<web_sys::Element> {
-    let mut current: Option<web_sys::Element> = Some(el.clone());
-    while let Some(ref elem) = current {
-        if elem.has_attribute("data-pos-start") && elem.has_attribute("data-pos-end") {
-            return Some(elem.clone());
-        }
-        if elem.class_list().contains("wysiwyg-container") {
-            return None;
-        }
-        current = elem.parent_element();
-    }
-    None
-}
-
-/// Walk up the DOM from an element to find the nearest ancestor (or self)
-/// that has the given attribute.
-pub fn find_ancestor_with_attr(el: &web_sys::Element, attr: &str) -> Option<web_sys::Element> {
-    let mut current: Option<web_sys::Element> = Some(el.clone());
-    while let Some(ref elem) = current {
-        if elem.has_attribute(attr) {
-            return Some(elem.clone());
-        }
-        if elem.class_list().contains("wysiwyg-container") {
-            return None;
-        }
-        current = elem.parent_element();
-    }
-    None
-}
-
-/// Parse an integer data attribute from an element.
-pub fn parse_data_attr(el: &web_sys::Element, attr: &str) -> Option<usize> {
-    el.get_attribute(attr)?.parse::<usize>().ok()
 }
