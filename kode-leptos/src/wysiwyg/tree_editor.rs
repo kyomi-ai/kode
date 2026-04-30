@@ -10,7 +10,6 @@
 //! - Positions are tree token positions, not byte offsets
 //! - DOM elements use `data-pos-start`/`data-pos-end` attributes for cursor mapping
 
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -143,17 +142,8 @@ pub fn TreeWysiwygEditor(
     language_aliases: Vec<(String, String)>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
-    // Collect code_block_languages from all extensions to mark matching
-    // CodeBlocks as atomic (opaque to cursor and editing).
-    let atomic_languages: HashSet<String> = extensions
-        .iter()
-        .flat_map(|ext| ext.code_block_languages().iter().map(|s| (*s).to_owned()))
-        .collect();
-    let atomic_languages = Arc::new(atomic_languages);
-
-    let doc_state = Arc::new(Mutex::new(DocState::from_markdown_with_atoms(
+    let doc_state = Arc::new(Mutex::new(DocState::from_markdown(
         &content.get_untracked(),
-        (*atomic_languages).clone(),
     )));
 
     // Reactive version counters — bumped to trigger re-render / cursor reposition.
@@ -465,51 +455,7 @@ pub fn TreeWysiwygEditor(
             };
 
             let el_start = parse_data_attr(&target_el, "data-pos-start").unwrap_or(0);
-            let el_end = parse_data_attr(&target_el, "data-pos-end").unwrap_or(el_start);
             let char_offset_in_el = head.saturating_sub(el_start);
-
-            // The cursor div lives inside the overlay (its positioned ancestor),
-            // so compute left/top relative to the overlay — not the scroll
-            // container — to stay correct when CSS grid or other layout shifts
-            // the overlay away from the container's origin.
-            let overlay_el = document.get_element_by_id(&overlay_id_raf);
-            let ref_rect = overlay_el
-                .as_ref()
-                .map(|el| el.get_bounding_client_rect())
-                .unwrap_or_else(|| container.get_bounding_client_rect());
-
-            // ── Gap cursor at atomic block ──────────────────────────
-            // If the target element is an atomic extension block, render
-            // the cursor at the boundary between blocks rather than
-            // trying to position inside the block's content.
-            let is_atomic = target_el.has_attribute("data-kode-extension")
-                || find_ancestor_with_attr(&target_el, "data-kode-extension").is_some();
-            if is_atomic {
-                let el_rect = target_el.get_bounding_client_rect();
-                // Position cursor at the top edge (gap before) or bottom
-                // edge (gap after) of the atomic block. The cursor is
-                // "before" the block when head <= el_start, "after" when
-                // head >= el_end.
-                let gap_y = if head >= el_end {
-                    el_rect.bottom()
-                } else {
-                    el_rect.top()
-                };
-                let gap_x = el_rect.left();
-
-                let cursor_height_gap = 20.0_f64; // fixed height for gap cursor
-                let left = gap_x - ref_rect.left();
-                let top = gap_y - ref_rect.top() + container.scroll_top() as f64
-                    - cursor_height_gap / 2.0;
-
-                let style = cursor_el.style();
-                let _ = style.set_property("top", &format!("{}px", top));
-                let _ = style.set_property("left", &format!("{}px", left));
-                let _ = style.set_property("height", &format!("{}px", cursor_height_gap));
-                let _ = style.set_property("display", "block");
-                let _ = style.set_property("visibility", "visible");
-            } else {
-            // ── Normal cursor positioning ───────────────────────────
             // Compute cursor height from the target element's line-height.
             let cursor_height = {
                 let Some(window) = web_sys::window() else {
@@ -541,6 +487,16 @@ pub fn TreeWysiwygEditor(
             } else {
                 measure_char_offset_position(&target_el, char_offset_in_el)
             };
+
+            // The cursor div lives inside the overlay (its positioned ancestor),
+            // so compute left/top relative to the overlay — not the scroll
+            // container — to stay correct when CSS grid or other layout shifts
+            // the overlay away from the container's origin.
+            let overlay_el = document.get_element_by_id(&overlay_id_raf);
+            let ref_rect = overlay_el
+                .as_ref()
+                .map(|el| el.get_bounding_client_rect())
+                .unwrap_or_else(|| container.get_bounding_client_rect());
 
             if let Some((x, y)) = measured {
                 let left = x - ref_rect.left();
@@ -577,7 +533,6 @@ pub fn TreeWysiwygEditor(
                 let _ = style.set_property("display", "block");
                 let _ = style.set_property("visibility", "visible");
             }
-            } // end normal cursor positioning
 
             // ── Scroll cursor into view ────────────────────────────────
             // If the cursor is outside the visible area of the scroll
@@ -587,12 +542,8 @@ pub fn TreeWysiwygEditor(
                     if let Ok(cursor_top) = top_str.trim_end_matches("px").parse::<f64>() {
                         let scroll_top = container.scroll_top() as f64;
                         let container_height = container.get_bounding_client_rect().height();
-                        let cursor_h = cursor_el.style()
-                            .get_property_value("height").ok()
-                            .and_then(|h| h.trim_end_matches("px").parse::<f64>().ok())
-                            .unwrap_or(24.0);
                         const SCROLL_MARGIN_PX: f64 = 10.0;
-                        let margin = cursor_h + SCROLL_MARGIN_PX;
+                        let margin = cursor_height + SCROLL_MARGIN_PX;
                         if cursor_top < scroll_top + margin {
                             container.set_scroll_top((cursor_top - margin).max(0.0) as i32);
                         } else if cursor_top > scroll_top + container_height - margin {

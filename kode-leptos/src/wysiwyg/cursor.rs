@@ -8,7 +8,7 @@ use wasm_bindgen::JsCast;
 use kode_doc::Node as DocNode;
 
 use super::click::{get_char_offset_from_point, js_caret_range_from_point};
-use super::dom_helpers::{find_ancestor_with_attr, find_ancestor_with_pos_attrs, parse_data_attr};
+use super::dom_helpers::{find_ancestor_with_pos_attrs, parse_data_attr};
 
 /// Fraction of line height used as the threshold for determining whether
 /// a cursor movement constitutes a visual line change vs horizontal movement.
@@ -18,11 +18,6 @@ const LINE_CHANGE_THRESHOLD: f64 = 0.25;
 /// next position inside a textblock. If `forward` is true, move right;
 /// otherwise move left. This prevents the cursor from resting at invisible
 /// structural boundaries between paragraphs/blocks.
-///
-/// Atomic blocks (extension-rendered code blocks) are also skipped — the
-/// cursor cannot enter them. When moving forward past an atomic block, the
-/// cursor lands after the block's closing token (a gap position). When
-/// moving backward, it lands before the block's opening token.
 ///
 /// Resolves the position once and computes the target directly instead of
 /// stepping one position at a time.
@@ -38,171 +33,51 @@ pub(crate) fn next_text_pos(doc: &DocNode, pos: usize, forward: bool) -> usize {
     let target = if forward { pos + 1 } else { pos - 1 };
     let resolved = doc.resolve(target);
 
-    // Already inside a textblock — check it's not inside an atomic block.
+    // Already inside a textblock — done.
     if resolved.parent().node_type.is_textblock() {
-        if !has_atomic_ancestor(&resolved) {
-            return target;
-        }
-        // Inside an atomic block: jump past it.
-        return jump_past_atomic_ancestor(doc, &resolved, forward);
-    }
-
-    // Not inside a textblock — `target` is at a structural boundary between
-    // blocks. Check if this is a valid gap cursor position (next to an atomic
-    // block). If so, stop here.
-    let before = resolved.node_before();
-    let after = resolved.node_after();
-    let before_is_atom = before.is_some_and(|n| n.is_atom());
-    let after_is_atom = after.is_some_and(|n| n.is_atom());
-    if before_is_atom || after_is_atom {
         return target;
     }
 
-    // Not a gap position — find the nearest non-atomic textblock.
+    // Not inside a textblock — find the nearest one by looking at adjacent
+    // nodes and jumping directly to their content.
     if forward {
         // Look for the next textblock: check node_after at each depth.
-        if let Some(after_node) = after {
-            return jump_into_first_textblock(after_node, target + 1);
+        if let Some(after) = resolved.node_after() {
+            return jump_into_first_textblock(after, target + 1);
         }
         // No node after at this depth — walk up to find one.
         for d in (0..resolved.depth).rev() {
             let parent_end = resolved.end(d);
             if parent_end + 1 < max {
                 let next_resolved = doc.resolve(parent_end + 1);
-                if let Some(next_after) = next_resolved.node_after() {
-                    if next_after.is_atom() {
-                        // Gap position before an atomic block.
-                        return parent_end + 1;
-                    }
-                    return jump_into_first_textblock(next_after, parent_end + 2);
+                if let Some(after) = next_resolved.node_after() {
+                    return jump_into_first_textblock(after, parent_end + 2);
                 }
             }
         }
         max
     } else {
         // Look for the previous textblock: check node_before at each depth.
-        if let Some(before_node) = before {
-            return jump_into_last_textblock(before_node, target);
+        if let Some(before) = resolved.node_before() {
+            return jump_into_last_textblock(before, target);
         }
         // No node before at this depth — walk up.
         for d in (0..resolved.depth).rev() {
             let parent_start = resolved.start(d);
             if parent_start > 0 {
                 let prev_resolved = doc.resolve(parent_start - 1);
-                if let Some(prev_before) = prev_resolved.node_before() {
+                if let Some(before) = prev_resolved.node_before() {
                     let before_end = parent_start - 1;
-                    if prev_before.is_atom() {
-                        // Gap position after an atomic block.
-                        return before_end;
-                    }
-                    return jump_into_last_textblock(prev_before, before_end);
+                    return jump_into_last_textblock(before, before_end);
                 }
             }
         }
-        0
-    }
-}
-
-/// Check if any ancestor of the resolved position is an atomic node.
-fn has_atomic_ancestor(resolved: &kode_doc::ResolvedPos) -> bool {
-    for d in (1..=resolved.depth).rev() {
-        if resolved.node(d).is_atom() {
-            return true;
-        }
-    }
-    false
-}
-
-/// When the cursor has landed inside an atomic block, jump past it.
-///
-/// If `forward`, jump to the gap position after the outermost atomic
-/// ancestor. If backward, jump before it. Then recursively resolve to
-/// a valid text or gap position.
-fn jump_past_atomic_ancestor(
-    doc: &DocNode,
-    resolved: &kode_doc::ResolvedPos,
-    forward: bool,
-) -> usize {
-    // Find the outermost atomic ancestor.
-    let mut atom_depth = resolved.depth;
-    for d in 1..=resolved.depth {
-        if resolved.node(d).is_atom() {
-            atom_depth = d;
-            break;
-        }
-    }
-
-    let gap_pos = if forward {
-        resolved.after(atom_depth)
-    } else {
-        resolved.before(atom_depth)
-    };
-
-    next_text_pos_or_gap(doc, gap_pos, forward)
-}
-
-/// Move to the next valid cursor position (textblock or gap position next to
-/// an atomic block). If `pos` is already valid, return it. Otherwise
-/// continue searching in the given direction.
-fn next_text_pos_or_gap(doc: &DocNode, pos: usize, forward: bool) -> usize {
-    let max = doc.content.size();
-    if pos > max {
-        return max;
-    }
-    if pos == 0 && !forward {
-        return 0;
-    }
-
-    let resolved = doc.resolve(pos);
-
-    // Inside a non-atomic textblock — valid position.
-    if resolved.parent().node_type.is_textblock() && !has_atomic_ancestor(&resolved) {
-        return pos;
-    }
-
-    // At a gap position (between blocks at Doc/container level)?
-    if !resolved.parent().node_type.is_textblock() {
-        let before = resolved.node_before();
-        let after = resolved.node_after();
-
-        // Valid gap position: at least one neighbor is atomic.
-        let before_is_atom = before.is_some_and(|n| n.is_atom());
-        let after_is_atom = after.is_some_and(|n| n.is_atom());
-        if before_is_atom || after_is_atom {
-            return pos;
-        }
-
-        // Not a gap position — try to enter the adjacent non-atomic textblock.
-        if forward {
-            if let Some(after_node) = after {
-                if !after_node.is_atom() {
-                    return jump_into_first_textblock(after_node, pos + 1);
-                }
-            }
-        } else if let Some(before_node) = before {
-            if !before_node.is_atom() {
-                return jump_into_last_textblock(before_node, pos);
-            }
-        }
-    }
-
-    // Keep searching.
-    if forward && pos < max {
-        next_text_pos_or_gap(doc, pos + 1, true)
-    } else if !forward && pos > 0 {
-        next_text_pos_or_gap(doc, pos - 1, false)
-    } else if forward {
-        max
-    } else {
         0
     }
 }
 
 /// Jump into a node's first textblock, returning the content start position.
 /// `node_start` is the position of the node's opening token.
-///
-/// Atomic nodes are never entered — the caller must check `is_atom()`
-/// before calling this function.
 fn jump_into_first_textblock(node: &DocNode, node_start: usize) -> usize {
     if node.node_type.is_textblock() {
         return node_start; // Content starts right after the opening token.
@@ -226,9 +101,6 @@ fn jump_into_first_textblock(node: &DocNode, node_start: usize) -> usize {
 
 /// Jump into a node's last textblock, returning the content end position.
 /// `after_node` is the position just after the node's closing token.
-///
-/// Atomic nodes are never entered — the caller must check `is_atom()`
-/// before calling this function.
 fn jump_into_last_textblock(node: &DocNode, after_node: usize) -> usize {
     if node.node_type.is_textblock() {
         // Content end = after_node - 1 (step back from closing token).
@@ -507,10 +379,6 @@ pub(crate) fn collect_last_text_node(
 /// 3. Use `caretRangeFromPoint` to find the character at the new position.
 /// 4. Convert back to a tree position.
 ///
-/// If the target lands inside an atomic block (detected via `data-kode-extension`
-/// attribute), snaps to the gap position before (when moving up) or after
-/// (when moving down) the block.
-///
 /// Returns `Some(new_pos)` or `None` if movement is not possible.
 pub(crate) fn vertical_cursor_move(
     document: &web_sys::Document,
@@ -524,28 +392,8 @@ pub(crate) fn vertical_cursor_move(
     let el_start = parse_data_attr(&target_el, "data-pos-start")?;
     let char_offset = head.saturating_sub(el_start);
 
-    // Check if the current position is at an atomic block (gap cursor).
-    let at_atomic = is_atomic_element(&target_el);
-
-    // Measure the pixel position of the cursor. For gap positions at atomic
-    // blocks, we use the block's bounding rect since there is no text to
-    // measure inside.
-    let (cursor_x, cursor_y) = if at_atomic {
-        let rect = target_el.get_bounding_client_rect();
-        // Use the content left edge for x; for y, use top or bottom edge
-        // depending on whether cursor is before or after the block.
-        let el_end = parse_data_attr(&target_el, "data-pos-end").unwrap_or(el_start);
-        let y = if head <= el_start {
-            rect.top()
-        } else if head >= el_end {
-            rect.bottom()
-        } else {
-            rect.top()
-        };
-        (rect.left(), y)
-    } else {
-        measure_char_offset_position(&target_el, char_offset)?
-    };
+    // Measure the pixel position of the cursor.
+    let (cursor_x, cursor_y) = measure_char_offset_position(&target_el, char_offset)?;
 
     // Get line-height from the target element.
     let line_height = web_sys::window()
@@ -578,18 +426,6 @@ pub(crate) fn vertical_cursor_move(
         });
 
         if let Some(ref el) = found_el {
-            // If the target element is an atomic block, snap to a gap position.
-            if is_atomic_element(el) {
-                let atom_start = parse_data_attr(el, "data-pos-start").unwrap_or(0);
-                let atom_end = parse_data_attr(el, "data-pos-end").unwrap_or(atom_start);
-                let gap_pos = if forward { atom_end } else { atom_start };
-                if gap_pos != head {
-                    return Some(gap_pos);
-                }
-                // Already at this gap — keep probing.
-                continue;
-            }
-
             let found_start = parse_data_attr(el, "data-pos-start").unwrap_or(0);
             hit_y = try_y;
             if found_start != el_start {
@@ -689,12 +525,6 @@ pub(crate) fn vertical_cursor_move(
     let nb_start = parse_data_attr(&neighbor_el, "data-pos-start")?;
     let nb_end = parse_data_attr(&neighbor_el, "data-pos-end").unwrap_or(nb_start);
 
-    // If the neighbor is an atomic block, snap to its gap position.
-    if is_atomic_element(&neighbor_el) {
-        let gap_pos = if forward { nb_end } else { nb_start };
-        return Some(gap_pos);
-    }
-
     // Try to preserve horizontal position using caretRangeFromPoint on the
     // neighbor element's bounding rect.
     let nb_rect = neighbor_el.get_bounding_client_rect();
@@ -707,11 +537,4 @@ pub(crate) fn vertical_cursor_move(
         .unwrap_or(0);
     let new_tree_pos = (nb_start + char_off).min(nb_end);
     Some(new_tree_pos)
-}
-
-/// Check if a DOM element is an atomic extension block by looking for the
-/// `data-kode-extension` attribute on the element or its ancestors.
-fn is_atomic_element(el: &web_sys::Element) -> bool {
-    el.has_attribute("data-kode-extension")
-        || find_ancestor_with_attr(el, "data-kode-extension").is_some()
 }
