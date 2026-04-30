@@ -1102,6 +1102,11 @@ fn find_text_point(container: &web_sys::Element, doc_pos: usize) -> Option<(web_
 
     let mut chars_remaining = target_char_offset;
 
+    // Advance past the root element to the first text node.
+    // (TreeWalker.currentNode starts at the root element regardless of the
+    // SHOW_TEXT filter — only navigation methods like nextNode() respect it.)
+    walker.next_node().ok().flatten()?;
+
     loop {
         let node = walker.current_node();
 
@@ -1131,14 +1136,18 @@ fn find_text_point(container: &web_sys::Element, doc_pos: usize) -> Option<(web_
 
     let mut last_node: Option<web_sys::Node> = None;
     let mut last_len = 0usize;
-    loop {
-        let node = walker.current_node();
-        if let Some(text) = node.text_content() {
-            last_len = text.encode_utf16().count();
-            last_node = Some(node);
-        }
-        if walker.next_node().ok().flatten().is_none() {
-            break;
+
+    // Advance past the root element to the first text node (same reason as above).
+    if walker.next_node().ok().flatten().is_some() {
+        loop {
+            let node = walker.current_node();
+            if let Some(text) = node.text_content() {
+                last_len = text.encode_utf16().count();
+                last_node = Some(node);
+            }
+            if walker.next_node().ok().flatten().is_none() {
+                break;
+            }
         }
     }
 
