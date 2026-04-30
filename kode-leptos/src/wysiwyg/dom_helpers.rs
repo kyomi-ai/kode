@@ -10,7 +10,7 @@ use kode_doc::Selection;
 /// Serializes to markdown, creates a temporary MarkdownEditor, runs the command,
 /// then parses the result back into DocState if changed.
 /// Returns `true` if the document was modified.
-pub(crate) fn apply_md_command(
+pub fn apply_md_command(
     ds: &mut kode_doc::DocState,
     f: impl FnOnce(&mut kode_markdown::MarkdownEditor),
 ) -> bool {
@@ -37,7 +37,7 @@ pub(crate) fn apply_md_command(
 
 /// Walk up the DOM from an element to find the nearest ancestor (or self)
 /// that has both `data-pos-start` and `data-pos-end` attributes.
-pub(crate) fn find_ancestor_with_pos_attrs(el: &web_sys::Element) -> Option<web_sys::Element> {
+pub fn find_ancestor_with_pos_attrs(el: &web_sys::Element) -> Option<web_sys::Element> {
     let mut current: Option<web_sys::Element> = Some(el.clone());
     while let Some(ref elem) = current {
         if elem.has_attribute("data-pos-start") && elem.has_attribute("data-pos-end") {
@@ -53,7 +53,7 @@ pub(crate) fn find_ancestor_with_pos_attrs(el: &web_sys::Element) -> Option<web_
 
 /// Walk up the DOM from an element to find the nearest ancestor (or self)
 /// that has the given attribute.
-pub(crate) fn find_ancestor_with_attr(el: &web_sys::Element, attr: &str) -> Option<web_sys::Element> {
+pub fn find_ancestor_with_attr(el: &web_sys::Element, attr: &str) -> Option<web_sys::Element> {
     let mut current: Option<web_sys::Element> = Some(el.clone());
     while let Some(ref elem) = current {
         if elem.has_attribute(attr) {
@@ -68,6 +68,6 @@ pub(crate) fn find_ancestor_with_attr(el: &web_sys::Element, attr: &str) -> Opti
 }
 
 /// Parse an integer data attribute from an element.
-pub(crate) fn parse_data_attr(el: &web_sys::Element, attr: &str) -> Option<usize> {
+pub fn parse_data_attr(el: &web_sys::Element, attr: &str) -> Option<usize> {
     el.get_attribute(attr)?.parse::<usize>().ok()
 }

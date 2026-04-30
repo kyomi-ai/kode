@@ -11,7 +11,7 @@ use super::dom_helpers::parse_data_attr;
 use wasm_bindgen::JsCast;
 
 /// Render selection highlight divs for a non-collapsed selection.
-pub(crate) fn render_selection_highlights(
+pub fn render_selection_highlights(
     document: &web_sys::Document,
     container: &web_sys::Element,
     overlay_id: &str,

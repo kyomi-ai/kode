@@ -9,7 +9,7 @@ use wasm_bindgen::JsValue;
 
 /// Get the character offset from a click point within an element, using
 /// the browser's caret position APIs.
-pub(crate) fn get_char_offset_from_point(
+pub fn get_char_offset_from_point(
     document: &web_sys::Document,
     x: f64,
     y: f64,
@@ -42,7 +42,7 @@ pub(crate) fn get_char_offset_from_point(
 }
 
 /// Call `document.caretRangeFromPoint(x, y)` via JS reflection (Chrome/Safari).
-pub(crate) fn js_caret_range_from_point(
+pub fn js_caret_range_from_point(
     document: &web_sys::Document,
     x: f64,
     y: f64,
@@ -59,7 +59,7 @@ pub(crate) fn js_caret_range_from_point(
 }
 
 /// Call `document.caretPositionFromPoint(x, y)` via JS reflection (Firefox).
-pub(crate) fn js_caret_position_from_point(
+pub fn js_caret_position_from_point(
     document: &web_sys::Document,
     x: f64,
     y: f64,
@@ -87,7 +87,7 @@ pub(crate) fn js_caret_position_from_point(
 
 /// Count visible characters in text nodes before (and partially within) the
 /// target node. Returns true if we found and counted the target node.
-pub(crate) fn count_chars_before_node(
+pub fn count_chars_before_node(
     node: &web_sys::Node,
     target: &web_sys::Node,
     offset_in_target: usize,

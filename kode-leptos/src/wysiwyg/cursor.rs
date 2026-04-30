@@ -21,7 +21,7 @@ const LINE_CHANGE_THRESHOLD: f64 = 0.25;
 ///
 /// Resolves the position once and computes the target directly instead of
 /// stepping one position at a time.
-pub(crate) fn next_text_pos(doc: &DocNode, pos: usize, forward: bool) -> usize {
+pub fn next_text_pos(doc: &DocNode, pos: usize, forward: bool) -> usize {
     let max = doc.content.size();
     if forward && pos >= max {
         return max;
@@ -130,7 +130,7 @@ fn jump_into_last_textblock(node: &DocNode, after_node: usize) -> usize {
 ///
 /// When `pos` equals an element's end, prefers the element ending there
 /// (end-of-content) over one starting there (start-of-next-block).
-pub(crate) fn find_element_for_pos(
+pub fn find_element_for_pos(
     container: &web_sys::Element,
     pos: usize,
 ) -> Option<web_sys::Element> {
@@ -216,7 +216,7 @@ fn find_element_for_pos_recursive(
 /// Walks the DOM tree top-down, always following the last positioned child,
 /// to find the deepest leaf element at the document's end. This is O(depth)
 /// instead of the previous O(elements) two-pass scan.
-pub(crate) fn find_last_positioned_element(container: &web_sys::Element) -> Option<web_sys::Element> {
+pub fn find_last_positioned_element(container: &web_sys::Element) -> Option<web_sys::Element> {
     find_last_positioned_recursive(container)
 }
 
@@ -246,7 +246,7 @@ fn find_last_positioned_recursive(parent: &web_sys::Element) -> Option<web_sys::
 
 /// Find the deepest (most specific) descendant that has `data-pos-start`.
 /// For a list item (LI) containing a paragraph span, returns the span.
-pub(crate) fn find_deepest_pos_child(el: &web_sys::Element) -> Option<web_sys::Element> {
+pub fn find_deepest_pos_child(el: &web_sys::Element) -> Option<web_sys::Element> {
     // Look for a child element with data-pos-start
     let children = el.query_selector_all("[data-pos-start]").ok()?;
     if children.length() == 0 {
@@ -263,7 +263,7 @@ pub(crate) fn find_deepest_pos_child(el: &web_sys::Element) -> Option<web_sys::E
 /// `char_offset` is the number of visible characters from the start of the
 /// element's text content. This walks text nodes depth-first and creates a
 /// collapsed Range at the target position.
-pub(crate) fn measure_char_offset_position(
+pub fn measure_char_offset_position(
     el: &web_sys::Element,
     char_offset: usize,
 ) -> Option<(f64, f64)> {
@@ -318,7 +318,7 @@ pub(crate) fn measure_char_offset_position(
 
 /// Walk text nodes depth-first to find the node and UTF-16 offset for a given
 /// visible character position.
-pub(crate) fn find_text_node_at_char_offset(
+pub fn find_text_node_at_char_offset(
     el: &web_sys::Element,
     remaining: &mut usize,
 ) -> Option<(web_sys::Node, usize)> {
@@ -353,7 +353,7 @@ fn find_text_node_in_subtree(
 }
 
 /// Collect the last text node in a subtree and its UTF-16 length.
-pub(crate) fn collect_last_text_node(
+pub fn collect_last_text_node(
     node: &web_sys::Node,
     last: &mut Option<web_sys::Node>,
     last_utf16_len: &mut usize,
@@ -380,7 +380,7 @@ pub(crate) fn collect_last_text_node(
 /// 4. Convert back to a tree position.
 ///
 /// Returns `Some(new_pos)` or `None` if movement is not possible.
-pub(crate) fn vertical_cursor_move(
+pub fn vertical_cursor_move(
     document: &web_sys::Document,
     container_el: &web_sys::Element,
     head: usize,

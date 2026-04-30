@@ -6,5 +6,5 @@ pub mod dom_helpers;
 pub mod selection;
 pub mod tree_editor;
 
-pub use doc_renderer::render_doc;
+pub use doc_renderer::{doc_to_html, render_doc};
 pub use tree_editor::TreeWysiwygEditor;

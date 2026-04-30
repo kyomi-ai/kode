@@ -393,16 +393,14 @@
     min-height: 0;
     position: relative;
     padding: var(--kode-content-padding, 1.5rem 2rem);
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    user-select: none;
+    outline: none;
 }
 
 .tree-wysiwyg-scroll-container ::selection {
-    background: transparent;
+    background: var(--kode-selection-bg, rgba(56, 132, 255, 0.3));
 }
 .tree-wysiwyg-scroll-container ::-moz-selection {
-    background: transparent;
+    background: var(--kode-selection-bg, rgba(56, 132, 255, 0.3));
 }
 
 /* Empty blocks need visible height so the cursor has somewhere to land */
