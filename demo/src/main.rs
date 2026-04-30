@@ -2,9 +2,45 @@ use std::sync::Arc;
 
 use kode_leptos::{
     CodeEditor, CompletionItem, CompletionKind, CompletionProviderConfig, EditorHandle, EditorMode,
-    Language, Marker, MarkerSeverity, MarkdownEditorComponent, Position, Theme,
+    Extension, Language, Marker, MarkerSeverity, MarkdownEditorComponent, Position, Theme,
 };
 use leptos::prelude::*;
+use leptos::tachys::view::any_view::AnyView;
+
+struct ChartDemoExtension;
+
+impl Extension for ChartDemoExtension {
+    fn name(&self) -> &str {
+        "chart-demo"
+    }
+
+    fn code_block_languages(&self) -> &[&str] {
+        &["chart"]
+    }
+
+    fn render_code_block(
+        &self,
+        _language: &str,
+        content: &str,
+        _block_start: usize,
+        _block_end: usize,
+    ) -> Option<AnyView> {
+        let content = content.to_string();
+        Some(
+            view! {
+                <div
+                    class="chart-demo-block"
+                    style="padding:16px;border:2px solid #f59e0b;border-radius:8px;background:#1a1625;color:#e2e8f0;font-family:system-ui,sans-serif;user-select:none;">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#f59e0b;margin-bottom:8px;">
+                        "Chart Block (atomic)"
+                    </div>
+                    <div style="font-size:14px;white-space:pre-wrap;">{content}</div>
+                </div>
+            }
+            .into_any(),
+        )
+    }
+}
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -83,7 +119,7 @@ fn App() -> impl IntoView {
     };
 
     // ── Markdown editor state ────────────────────────────────────
-    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
+    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n```chart\ntitle: Regional Breakdown\ntype: pie\n```\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
 
     let (md_content, set_md_content) = signal(markdown_sample.to_string());
 
@@ -235,6 +271,7 @@ fn App() -> impl IntoView {
                                     })
                                     initial_mode=EditorMode::Wysiwyg
                                     theme=theme
+                                    extensions=vec![Arc::new(ChartDemoExtension) as Arc<dyn Extension>]
                                 />
                             </div>
                         </div>
