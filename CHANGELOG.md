@@ -6,6 +6,16 @@ All notable changes to this project are documented here. Format based on
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-04-30
+
+### Fixed
+
+#### `kode-leptos`
+
+- WYSIWYG cursor and selection highlights now position relative to the overlay
+  element instead of the scroll container. Fixes cursor drifting right when
+  consumers apply CSS grid layout to the scroll container.
+
 ## [0.2.0] — 2026-04-17
 
 ### Breaking changes
