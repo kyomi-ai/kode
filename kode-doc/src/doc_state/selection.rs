@@ -14,24 +14,90 @@ impl DocState {
     /// closing token, move it to the end of that textblock's content.  When
     /// it's right before a textblock's opening token, move it to the start
     /// of that textblock's content.  Returns the adjusted position.
+    ///
+    /// Atomic blocks are never entered — if a neighboring node is atomic,
+    /// the position is a valid **gap cursor** position and is returned as-is.
+    /// If one neighbor is atomic and the other is a non-atomic textblock,
+    /// the position is adjusted into the non-atomic textblock.
     pub fn adjust_into_textblock(&self, pos: usize) -> usize {
         let resolved = self.doc.resolve(pos);
         if resolved.parent().node_type.is_textblock() {
             return pos; // Already inside a textblock.
         }
-        // Try the node before this position — if it's a textblock, move
+
+        let before = resolved.node_before();
+        let after = resolved.node_after();
+
+        let before_is_textblock = before.is_some_and(|n| n.node_type.is_textblock() && !n.is_atom());
+        let after_is_textblock = after.is_some_and(|n| n.node_type.is_textblock() && !n.is_atom());
+
+        // Try the node before — if it's a non-atomic textblock, move
         // to the end of its content.
-        if resolved.node_before().is_some_and(|n| n.node_type.is_textblock()) {
+        if before_is_textblock {
             // pos is right after the closing token of the previous textblock.
             // The end of its content = pos - 1.
             return pos - 1;
         }
-        // Try the node after — if it's a textblock, move to the start
-        // of its content.
-        if resolved.node_after().is_some_and(|n| n.node_type.is_textblock()) {
+        // Try the node after — if it's a non-atomic textblock, move to the
+        // start of its content.
+        if after_is_textblock {
             // pos is right before the opening token of the next textblock.
             // The start of its content = pos + 1.
             return pos + 1;
+        }
+        // Neither neighbor is a non-atomic textblock. This position is either
+        // a gap cursor next to an atomic block, between two non-textblocks,
+        // or at a doc boundary — return as-is.
+        pos
+    }
+
+    // ── Selection expansion for atomic blocks ────────────────────────
+
+    /// Expand a selection so that partially-selected atomic blocks are
+    /// fully included.
+    ///
+    /// If `from` or `to` falls inside an atomic block's position range
+    /// `[block_start, block_end]`, the boundary is expanded to include the
+    /// entire block.  Selections that do not intersect any atomic block
+    /// are returned unchanged.
+    ///
+    /// This should be called when setting range selections (e.g. after
+    /// click-drag or shift+arrow) so that atomic blocks are always
+    /// selected as indivisible units.
+    pub fn expand_selection_around_atoms(&self, sel: &Selection) -> Selection {
+        let from = sel.from();
+        let to = sel.to();
+
+        let expanded_from = self.expand_pos_out_of_atom(from, true);
+        let expanded_to = self.expand_pos_out_of_atom(to, false);
+
+        if expanded_from == from && expanded_to == to {
+            return sel.clone();
+        }
+
+        // Preserve anchor/head directionality.
+        if sel.anchor <= sel.head {
+            Selection::range(expanded_from, expanded_to)
+        } else {
+            Selection::range(expanded_to, expanded_from)
+        }
+    }
+
+    /// If `pos` is inside an atomic node, return the position just before
+    /// (if `toward_start` is true) or just after (if false) that node.
+    /// Otherwise return `pos` unchanged.
+    fn expand_pos_out_of_atom(&self, pos: usize, toward_start: bool) -> usize {
+        let resolved = self.doc.resolve(pos);
+        // Walk ancestors from innermost to outermost, looking for an atomic
+        // node. The first atomic ancestor we find is the one to expand to.
+        for d in (1..=resolved.depth).rev() {
+            let ancestor = resolved.node(d);
+            if ancestor.is_atom() {
+                if toward_start {
+                    return resolved.before(d);
+                }
+                return resolved.after(d);
+            }
         }
         pos
     }
