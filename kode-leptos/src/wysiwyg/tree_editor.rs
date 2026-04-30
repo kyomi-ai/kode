@@ -529,6 +529,33 @@ pub fn TreeWysiwygEditor(
                 }
                 true
             }
+            // ── Tab / Shift+Tab list indentation ────────────────────
+            "Tab" if !ctrl => {
+                let md = ds.to_markdown();
+                let cursor_byte = kode_doc::tree_pos_to_byte_offset(ds.doc(), &md, ds.selection().head);
+                let mut temp = kode_markdown::MarkdownEditor::new(&md);
+                let char_idx = temp.buffer().byte_to_char(cursor_byte);
+                let pos = temp.buffer().char_to_pos(char_idx);
+                temp.set_cursor(pos);
+
+                let applied = if shift {
+                    kode_markdown::InputRules::handle_shift_tab(temp.editor_mut())
+                } else {
+                    kode_markdown::InputRules::handle_tab(temp.editor_mut())
+                };
+
+                if applied {
+                    temp.sync_tree();
+                    let new_md = temp.text();
+                    let new_cursor = temp.cursor();
+                    let new_char_idx = temp.buffer().pos_to_char(new_cursor);
+                    let new_byte = temp.buffer().char_to_byte(new_char_idx);
+                    ds.set_from_markdown(&new_md);
+                    let new_tree_pos = kode_doc::byte_offset_to_tree_pos(ds.doc(), &new_md, new_byte);
+                    ds.set_selection(Selection::cursor(new_tree_pos));
+                }
+                applied
+            }
             _ => false,
         };
 
