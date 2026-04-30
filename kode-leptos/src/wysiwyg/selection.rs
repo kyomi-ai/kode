@@ -24,7 +24,7 @@ pub(crate) fn render_selection_highlights(
     let sel_from = sel.from();
     let sel_to = sel.to();
 
-    let container_rect = container.get_bounding_client_rect();
+    let overlay_rect = overlay_el.get_bounding_client_rect();
     let scroll_top_px = container.scroll_top() as f64;
 
     let elements = match container.query_selector_all("[data-pos-start][data-pos-end]").ok() {
@@ -60,8 +60,8 @@ pub(crate) fn render_selection_highlights(
 
         if fully_selected {
             if let Ok(div) = document.create_element("div") {
-                let el_left = el_rect.left() - container_rect.left();
-                let el_top = el_rect.top() - container_rect.top() + scroll_top_px;
+                let el_left = el_rect.left() - overlay_rect.left();
+                let el_top = el_rect.top() - overlay_rect.top() + scroll_top_px;
                 let _ = div.set_attribute("class", "kode-selection");
                 let _ = div.set_attribute("style", &format!(
                     "position:absolute;top:{}px;left:{}px;width:{}px;height:{}px;background:var(--kode-selection);pointer-events:none;",
@@ -83,8 +83,8 @@ pub(crate) fn render_selection_highlights(
                         // Same line — use the element's actual height so
                         // the highlight covers the full text for all block
                         // types (headings have larger font than body text).
-                        let left = sx - container_rect.left();
-                        let top = el_rect.top() - container_rect.top() + scroll_top_px;
+                        let left = sx - overlay_rect.left();
+                        let top = el_rect.top() - overlay_rect.top() + scroll_top_px;
                         let width = ex - sx;
                         if let Ok(div) = document.create_element("div") {
                             let _ = div.set_attribute("class", "kode-selection");
@@ -99,15 +99,15 @@ pub(crate) fn render_selection_highlights(
                         // 1. First line: from selection start to right edge
                         // 2. Middle lines: full width
                         // 3. Last line: from left edge to selection end
-                        let el_left = el_rect.left() - container_rect.left();
+                        let el_left = el_rect.left() - overlay_rect.left();
 
                         // Line height for each row
                         let line_h = (ey - sy).abs() / ((ey - sy).abs() / 20.0).ceil().max(1.0);
                         let line_h = if line_h > 5.0 && line_h < 50.0 { line_h } else { 22.0 };
 
                         // First line: from start_x to right edge of element
-                        let first_top = sy - container_rect.top() + scroll_top_px;
-                        let first_left = sx - container_rect.left();
+                        let first_top = sy - overlay_rect.top() + scroll_top_px;
+                        let first_left = sx - overlay_rect.left();
                         let first_width = el_rect.right() - sx;
                         if let Ok(div) = document.create_element("div") {
                             let _ = div.set_attribute("class", "kode-selection");
@@ -120,7 +120,7 @@ pub(crate) fn render_selection_highlights(
 
                         // Middle lines: full width between first and last line
                         let middle_top = first_top + line_h;
-                        let last_top = ey - container_rect.top() + scroll_top_px;
+                        let last_top = ey - overlay_rect.top() + scroll_top_px;
                         if last_top - middle_top > 1.0 {
                             let mid_height = last_top - middle_top;
                             if let Ok(div) = document.create_element("div") {
@@ -148,8 +148,8 @@ pub(crate) fn render_selection_highlights(
                 }
                 _ => {
                     // Fallback: full element highlight.
-                    let el_left = el_rect.left() - container_rect.left();
-                    let el_top = el_rect.top() - container_rect.top() + scroll_top_px;
+                    let el_left = el_rect.left() - overlay_rect.left();
+                    let el_top = el_rect.top() - overlay_rect.top() + scroll_top_px;
                     if let Ok(div) = document.create_element("div") {
                         let _ = div.set_attribute("class", "kode-selection");
                         let _ = div.set_attribute("style", &format!(

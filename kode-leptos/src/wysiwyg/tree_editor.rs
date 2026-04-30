@@ -488,10 +488,19 @@ pub fn TreeWysiwygEditor(
                 measure_char_offset_position(&target_el, char_offset_in_el)
             };
 
+            // The cursor div lives inside the overlay (its positioned ancestor),
+            // so compute left/top relative to the overlay — not the scroll
+            // container — to stay correct when CSS grid or other layout shifts
+            // the overlay away from the container's origin.
+            let overlay_el = document.get_element_by_id(&overlay_id_raf);
+            let ref_rect = overlay_el
+                .as_ref()
+                .map(|el| el.get_bounding_client_rect())
+                .unwrap_or_else(|| container.get_bounding_client_rect());
+
             if let Some((x, y)) = measured {
-                let container_rect = container.get_bounding_client_rect();
-                let left = x - container_rect.left();
-                let top = y - container_rect.top() + container.scroll_top() as f64;
+                let left = x - ref_rect.left();
+                let top = y - ref_rect.top() + container.scroll_top() as f64;
                 let style = cursor_el.style();
                 let _ = style.set_property("top", &format!("{}px", top));
                 let _ = style.set_property("left", &format!("{}px", left));
@@ -502,18 +511,17 @@ pub fn TreeWysiwygEditor(
                 // Fallback: position at the element's top-left. For empty
                 // elements (empty paragraphs, new documents), the element may
                 // have zero width — use the parent's content area instead.
-                let container_rect = container.get_bounding_client_rect();
                 let el_rect = target_el.get_bounding_client_rect();
                 let (left, top) = if el_rect.height() > 0.0 {
                     (
-                        el_rect.left() - container_rect.left(),
-                        el_rect.top() - container_rect.top() + container.scroll_top() as f64,
+                        el_rect.left() - ref_rect.left(),
+                        el_rect.top() - ref_rect.top() + container.scroll_top() as f64,
                     )
                 } else if let Some(parent) = target_el.parent_element() {
                     let pr = parent.get_bounding_client_rect();
                     (
-                        pr.left() - container_rect.left(),
-                        pr.top() - container_rect.top() + container.scroll_top() as f64,
+                        pr.left() - ref_rect.left(),
+                        pr.top() - ref_rect.top() + container.scroll_top() as f64,
                     )
                 } else {
                     (0.0, container.scroll_top() as f64)
