@@ -732,34 +732,59 @@ fn block_node_to_html(
             };
             let content_text = node.text_content();
 
-            // Phase 1: render all code blocks as syntax-highlighted blocks,
-            // even for extension languages. Phase 2 will add contenteditable="false" wrappers.
-            let highlight_lang = match_language(lang, language_aliases);
-            let highlighted_lines: Vec<String> = content_text
-                .lines()
-                .map(|line| highlight::highlight_line(line, &highlight_lang))
-                .collect();
-            let mut code_html = highlighted_lines.join("\n");
-            if content_text.ends_with('\n') {
-                code_html.push('\n');
-            }
+            // Check if any extension handles this language — render as
+            // an atomic contenteditable="false" block instead of an
+            // editable syntax-highlighted code block.
+            let is_extension = extensions
+                .iter()
+                .any(|ext| ext.code_block_languages().contains(&lang));
 
-            html.push_str(&format!(
-                "<div class=\"wysiwyg-code-block\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
-                content_start, content_end
-            ));
-            if !lang.is_empty() {
+            if is_extension {
+                let escaped_content = html_escape(&content_text);
+                let escaped_lang = html_escape(lang);
                 html.push_str(&format!(
-                    "<div class=\"wysiwyg-code-lang\">{}</div>",
-                    html_escape(lang)
+                    "<div contenteditable=\"false\" class=\"kode-extension-block\" \
+                     data-kode-extension=\"{ext}\" \
+                     data-pos-start=\"{start}\" data-pos-end=\"{end}\">\
+                     <div class=\"kode-extension-content\">{content}</div>\
+                     </div>",
+                    ext = escaped_lang,
+                    start = content_start,
+                    end = content_end,
+                    content = escaped_content,
+                ));
+            } else {
+                // Default: syntax-highlighted code block
+                let highlight_lang = match_language(lang, language_aliases);
+                let highlighted_lines: Vec<String> = content_text
+                    .lines()
+                    .map(|line| highlight::highlight_line(line, &highlight_lang))
+                    .collect();
+                let mut code_html = highlighted_lines.join("\n");
+                if content_text.ends_with('\n') {
+                    code_html.push('\n');
+                }
+
+                // Render as a single <pre> with the language as a data
+                // attribute. The language label is rendered via CSS
+                // ::before so it doesn't create a cursor trap between
+                // the label and the code content.
+                let lang_attr = if lang.is_empty() {
+                    String::new()
+                } else {
+                    format!(" data-lang=\"{}\"", html_escape(lang))
+                };
+                // NOTE: highlight_line() HTML-escapes source text before wrapping in <span> tags
+                html.push_str(&format!(
+                    "<pre class=\"wysiwyg-code-block kode-content\" \
+                     data-pos-start=\"{cs}\" data-pos-end=\"{ce}\"{lang_attr}>\
+                     <code>{code}</code></pre>",
+                    cs = content_start,
+                    ce = content_end,
+                    lang_attr = lang_attr,
+                    code = code_html,
                 ));
             }
-            // NOTE: highlight_line() HTML-escapes source text before wrapping in <span> tags
-            html.push_str(&format!(
-                "<pre class=\"kode-content\"><code data-pos-start=\"{}\" data-pos-end=\"{}\">{}</code></pre>",
-                content_start, content_end, code_html
-            ));
-            html.push_str("</div>");
         }
 
         // ── Horizontal rule ──────────────────────────────────────────
@@ -1359,10 +1384,65 @@ mod tests {
         let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
         let html = doc_to_html(&doc, &[], &[]);
         assert!(html.contains("wysiwyg-code-block"));
-        assert!(html.contains("wysiwyg-code-lang"));
+        // Language label is now a data attribute, rendered via CSS ::before
+        assert!(html.contains("data-lang=\"sql\""));
         // Text may be wrapped in highlight spans (e.g. "<a-k>SELECT</a-k>")
         assert!(html.contains("SELECT"));
         assert!(html.contains("1"));
+    }
+
+    #[test]
+    fn doc_to_html_extension_code_block() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("title: Revenue\ntype: bar")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let html = doc_to_html(&doc, &[ext], &[]);
+
+        // Extension blocks get contenteditable="false"
+        assert!(html.contains("contenteditable=\"false\""));
+        // Extension blocks have the kode-extension-block class
+        assert!(html.contains("kode-extension-block"));
+        // Extension name is stored in data-kode-extension
+        assert!(html.contains("data-kode-extension=\"chart\""));
+        // Raw content is present
+        assert!(html.contains("title: Revenue"));
+        assert!(html.contains("type: bar"));
+        // Should NOT have the regular code block class structure
+        assert!(!html.contains("<code>"));
+    }
+
+    #[test]
+    fn doc_to_html_non_extension_code_block_ignores_extensions() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        // A "sql" code block should render normally even with extensions present
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("sql"),
+            Fragment::from_node(Node::new_text("SELECT 1")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let html = doc_to_html(&doc, &[ext], &[]);
+
+        assert!(html.contains("wysiwyg-code-block"));
+        assert!(html.contains("<code>"));
+        assert!(!html.contains("contenteditable=\"false\""));
+        assert!(!html.contains("kode-extension-block"));
     }
 
     #[test]

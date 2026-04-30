@@ -267,30 +267,61 @@
 
 /* ── Code blocks ───────────────────────────────────────────────────── */
 
-.wysiwyg-code-block {
+/* Code blocks use a single <pre> as the positioned element (no wrapper
+ * div) to avoid cursor traps between structural elements.  The language
+ * label is rendered via ::before from the data-lang attribute. */
+
+pre.wysiwyg-code-block {
     position: relative;
     margin: var(--kode-code-block-margin, 1em 0);
-    border-radius: var(--kode-code-block-border-radius, 6px);
-    overflow: hidden;
-    background: var(--kode-code-block-wrapper-background, var(--kode-bg-highlight));
-    border: var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border));
-    border-left: var(--kode-code-block-border-left, var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border)));
-}
-
-.wysiwyg-code-block pre {
-    margin: 0;
     padding: var(--kode-code-block-padding, 1em);
-    background: var(--kode-code-block-background, var(--kode-bg));
-    border: var(--kode-code-block-inner-border-width, 1px) solid var(--kode-code-block-inner-border-color, var(--kode-border));
     border-radius: var(--kode-code-block-border-radius, 6px);
     overflow-x: auto;
+    background: var(--kode-code-block-background, var(--kode-bg));
+    border: var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border));
+    border-left: var(--kode-code-block-border-left, var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border)));
     font-size: var(--kode-code-block-font-size, 0.9em);
     line-height: var(--kode-code-block-line-height, 1.5);
 }
 
-.wysiwyg-code-block code {
+/* Language label rendered as a CSS pseudo-element so it doesn't
+ * participate in the content flow and cannot trap the cursor. */
+pre.wysiwyg-code-block[data-lang]::before {
+    content: attr(data-lang);
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: var(--kode-code-lang-font-size, 0.7em);
+    color: var(--kode-fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    user-select: none;
+}
+
+pre.wysiwyg-code-block code {
     font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace);
     white-space: pre;
+}
+
+/* ── Extension blocks ─────────────────────────────────────────────── */
+
+.kode-extension-block {
+    user-select: none;
+    cursor: default;
+    margin: var(--kode-code-block-margin, 1em 0);
+    padding: var(--kode-extension-block-padding, 16px);
+    border: var(--kode-extension-block-border-width, 1px) solid var(--kode-extension-block-border-color, var(--kode-border));
+    border-radius: var(--kode-code-block-border-radius, 6px);
+    background: var(--kode-extension-block-background, var(--kode-bg-highlight));
+    color: var(--kode-fg);
+}
+
+.kode-extension-content {
+    white-space: pre-wrap;
+    font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace);
+    font-size: var(--kode-code-block-font-size, 0.9em);
+    line-height: var(--kode-code-block-line-height, 1.5);
 }
 
 /* ── Inline code ───────────────────────────────────────────────────── */
@@ -366,11 +397,28 @@
 
 /* ── Code blocks (embedded editor variant) ─────────────────────────── */
 
-.wysiwyg-code-block pre.kode-content {
+/* When used inside the view-based renderer (render_doc), the code block
+ * has a wrapper div + inner pre.  These rules keep backward compat. */
+div.wysiwyg-code-block {
+    position: relative;
+    margin: var(--kode-code-block-margin, 1em 0);
+    border-radius: var(--kode-code-block-border-radius, 6px);
+    overflow: hidden;
+    background: var(--kode-code-block-wrapper-background, var(--kode-bg-highlight));
+    border: var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border));
+    border-left: var(--kode-code-block-border-left, var(--kode-code-block-wrapper-border-width, 1px) solid var(--kode-code-block-wrapper-border-color, var(--kode-border)));
+}
+
+div.wysiwyg-code-block pre.kode-content {
     margin: 0;
     padding: var(--kode-code-block-padding, 0.75em 1em);
     background: transparent;
     font-size: var(--kode-code-block-font-size, 0.9em);
+}
+
+div.wysiwyg-code-block code {
+    font-family: var(--kode-code-font-family, "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace);
+    white-space: pre;
 }
 
 .wysiwyg-code-lang {
