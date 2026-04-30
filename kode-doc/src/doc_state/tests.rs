@@ -2031,4 +2031,369 @@ mod atom_tests {
         let expanded = state.expand_selection_around_atoms(&sel);
         assert_eq!(expanded, sel, "non-atomic code block should not trigger expansion");
     }
+
+    // ── Backspace with atomic blocks ────────────────────────────────
+
+    #[test]
+    fn backspace_at_gap_after_atomic_deletes_atomic_block() {
+        // <doc><codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock></doc>
+        //   cb1: 0..8, cb2: 8..15
+        // Cursor at gap 8 (between the two atomic blocks).
+        // Backspace should delete cb1 (node before the cursor).
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.backspace();
+
+        // Only cb2 should remain.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(0).text_content(), "graph");
+    }
+
+    #[test]
+    fn backspace_at_start_of_paragraph_after_atomic_deletes_atomic() {
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        //   cb: 0..7, p: 7..14
+        // Cursor at pos 8 (start of paragraph content).
+        // Backspace at start of paragraph — previous block is atomic — delete it.
+        let (doc, atoms) = atomic_then_paragraph_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.backspace();
+
+        // Only the paragraph should remain.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hello");
+    }
+
+    #[test]
+    fn backspace_at_gap_between_two_atomic_blocks_deletes_one_before() {
+        // <doc><codeblock[chartml]>abc</codeblock><codeblock[mermaid]>xyz</codeblock></doc>
+        //   cb1: 0..5 (content "abc"), cb2: 5..10 (content "xyz")
+        // Cursor at gap 5.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("abc")),
+        );
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("xyz")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+        state.selection = Selection::cursor(5);
+        state.backspace();
+
+        // cb1 deleted, cb2 remains.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).text_content(), "xyz");
+    }
+
+    #[test]
+    fn backspace_inside_non_atomic_code_block_deletes_char() {
+        // <doc><codeblock[rust]>let x;</codeblock></doc>
+        // Non-atomic code block: backspace inside should delete a character.
+        let cb = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("rust"),
+            Fragment::from_node(Node::new_text("let x;")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(cb));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml"]));
+        // Cursor at pos 5 (inside "let x;" → after "let ")
+        state.selection = Selection::cursor(5);
+        state.backspace();
+
+        assert_eq!(state.doc.child(0).text_content(), "letx;");
+    }
+
+    // ── Delete forward with atomic blocks ───────────────────────────
+
+    #[test]
+    fn delete_at_gap_before_atomic_deletes_atomic_block() {
+        // <doc><codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock></doc>
+        //   cb1: 0..8, cb2: 8..15
+        // Cursor at gap 8. Delete forward should delete cb2 (node after).
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.delete_forward();
+
+        // Only cb1 should remain.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(0).text_content(), "chart1");
+    }
+
+    #[test]
+    fn delete_at_end_of_paragraph_before_atomic_deletes_atomic() {
+        // <doc><p>Hello</p><codeblock[chartml]>chart</codeblock></doc>
+        //   p: 0..7, cb: 7..14
+        // Cursor at pos 6 (end of paragraph content).
+        // Delete forward — next block is atomic — delete it.
+        let (doc, atoms) = paragraph_then_atomic_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(6);
+        state.delete_forward();
+
+        // Only the paragraph should remain.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hello");
+    }
+
+    #[test]
+    fn delete_at_gap_between_two_atomic_blocks_deletes_one_after() {
+        // <doc><codeblock[chartml]>abc</codeblock><codeblock[mermaid]>xyz</codeblock></doc>
+        //   cb1: 0..5, cb2: 5..10
+        // Cursor at gap 5. Delete forward should delete cb2.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("abc")),
+        );
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("xyz")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+        state.selection = Selection::cursor(5);
+        state.delete_forward();
+
+        // cb2 deleted, cb1 remains.
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).text_content(), "abc");
+    }
+
+    // ── Insert text at gap positions ────────────────────────────────
+
+    #[test]
+    fn insert_text_at_gap_creates_paragraph_with_text() {
+        // <doc><codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock></doc>
+        //   cb1: 0..8, cb2: 8..15
+        // Cursor at gap 8. Insert text should create a new paragraph.
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.insert_text("Hello");
+
+        // Should now be: cb1, paragraph("Hello"), cb2
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(0).text_content(), "chart1");
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "Hello");
+        assert_eq!(state.doc.child(2).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(2).text_content(), "graph");
+    }
+
+    #[test]
+    fn insert_text_at_gap_between_two_atomic_blocks() {
+        // <doc><codeblock[chartml]>abc</codeblock><codeblock[mermaid]>xyz</codeblock></doc>
+        //   cb1: 0..5, cb2: 5..10
+        // Cursor at gap 5.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("abc")),
+        );
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("xyz")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+        state.selection = Selection::cursor(5);
+        state.insert_text("Hi");
+
+        // Should be: cb1, paragraph("Hi"), cb2
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "Hi");
+    }
+
+    #[test]
+    fn insert_text_inside_normal_paragraph_unchanged_behavior() {
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        // Cursor at pos 8 (inside paragraph), adjusted by set_selection.
+        // Insert text should go into the paragraph normally.
+        let (doc, atoms) = atomic_then_paragraph_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(10));
+        state.insert_text("XY");
+
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "HeXYllo");
+    }
+
+    // ── Split block (Enter) at gap positions ────────────────────────
+
+    #[test]
+    fn enter_at_gap_creates_empty_paragraph() {
+        // <doc><codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock></doc>
+        //   cb1: 0..8, cb2: 8..15
+        // Cursor at gap 8. Enter should insert an empty paragraph.
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.split_block();
+
+        // Should be: cb1, empty paragraph, cb2
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "");
+        assert_eq!(state.doc.child(2).node_type, NodeType::CodeBlock);
+        // Cursor should be inside the new paragraph.
+        assert_eq!(state.selection, Selection::cursor(9));
+    }
+
+    #[test]
+    fn enter_at_gap_between_two_atomic_blocks() {
+        // <doc><codeblock[chartml]>abc</codeblock><codeblock[mermaid]>xyz</codeblock></doc>
+        //   cb1: 0..5, cb2: 5..10
+        // Cursor at gap 5.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("abc")),
+        );
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("xyz")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+        state.selection = Selection::cursor(5);
+        state.split_block();
+
+        // Should be: cb1, empty paragraph, cb2
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "");
+        // Cursor inside the new paragraph.
+        assert_eq!(state.selection, Selection::cursor(6));
+    }
+
+    #[test]
+    fn enter_inside_normal_paragraph_unchanged_behavior() {
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        // Cursor at pos 10 (inside "Hello" at "He|llo").
+        // Enter should split the paragraph normally.
+        let (doc, atoms) = atomic_then_paragraph_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(10));
+        state.split_block();
+
+        // cb stays, paragraph splits into two.
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "He");
+        assert_eq!(state.doc.child(2).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(2).text_content(), "llo");
+    }
+
+    // ── Edge cases ──────────────────────────────────────────────────
+
+    #[test]
+    fn backspace_at_doc_start_before_atomic_is_noop() {
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        // Cursor at position 0. Backspace should do nothing.
+        let (doc, atoms) = atomic_then_paragraph_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(0);
+        state.backspace();
+
+        assert_eq!(state.doc.child_count(), 2);
+        assert!(state.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn delete_at_doc_end_after_atomic_is_noop() {
+        // <doc><p>Hello</p><codeblock[chartml]>chart</codeblock></doc>
+        // Cursor at doc end. Delete should do nothing.
+        let (doc, atoms) = paragraph_then_atomic_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        let doc_size = state.doc.content.size();
+        state.selection = Selection::cursor(doc_size);
+        state.delete_forward();
+
+        assert_eq!(state.doc.child_count(), 2);
+        assert!(state.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn backspace_after_atomic_is_undoable() {
+        // Verify that deleting an atomic block via backspace can be undone.
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.backspace();
+
+        assert_eq!(state.doc.child_count(), 1);
+
+        // Undo should restore both blocks.
+        assert!(state.undo());
+        assert_eq!(state.doc.child_count(), 2);
+        assert_eq!(state.doc.child(0).text_content(), "chart1");
+        assert_eq!(state.doc.child(1).text_content(), "graph");
+    }
+
+    #[test]
+    fn delete_forward_of_atomic_is_undoable() {
+        // Verify that deleting an atomic block via delete forward can be undone.
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(8);
+        state.delete_forward();
+
+        assert_eq!(state.doc.child_count(), 1);
+
+        // Undo should restore both blocks.
+        assert!(state.undo());
+        assert_eq!(state.doc.child_count(), 2);
+    }
+
+    #[test]
+    fn insert_text_at_gap_at_doc_start() {
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        // Cursor at position 0 (before the atomic block).
+        // Insert text should create a paragraph before the atomic block.
+        let (doc, atoms) = atomic_then_paragraph_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.selection = Selection::cursor(0);
+        state.insert_text("Hi");
+
+        // Should be: paragraph("Hi"), codeblock, paragraph
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hi");
+        assert_eq!(state.doc.child(1).node_type, NodeType::CodeBlock);
+    }
+
+    #[test]
+    fn enter_at_gap_at_doc_end() {
+        // <doc><p>Hello</p><codeblock[chartml]>chart</codeblock></doc>
+        // Cursor at doc end (after atomic block).
+        // Enter should create an empty paragraph at the end.
+        let (doc, atoms) = paragraph_then_atomic_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        let doc_size = state.doc.content.size();
+        state.selection = Selection::cursor(doc_size);
+        state.split_block();
+
+        // Should be: paragraph, codeblock, empty paragraph
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(2).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(2).text_content(), "");
+    }
 }

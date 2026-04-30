@@ -87,6 +87,32 @@ impl DocState {
 
         let resolved = self.doc.resolve(from);
 
+        // ── Atomic block handling ─────────────────────────────────────
+        //
+        // Case 1: Cursor at a gap position (parent is NOT a textblock).
+        // If the node before the cursor is atomic, delete the entire
+        // atomic block.
+        if !resolved.parent().node_type.is_textblock() {
+            if let Some(node_before) = resolved.node_before() {
+                if node_before.is_atom() {
+                    let atom_size = node_before.node_size();
+                    let delete_from = from - atom_size;
+                    self.push_undo();
+                    let mut tr = Transform::new(self.doc.clone());
+                    if tr.delete(delete_from, from).is_ok() {
+                        self.doc = tr.doc;
+                        self.selection = Selection::cursor(
+                            self.adjust_into_textblock(
+                                delete_from.min(self.doc.content.size())
+                            )
+                        );
+                    }
+                    self.redo_stack.clear();
+                    return;
+                }
+            }
+        }
+
         // Check if cursor is at start of a textblock content.
         if resolved.parent_offset == 0 && resolved.parent().node_type.is_textblock() {
             // If inside any non-Doc wrapper (ListItem, Blockquote, List,
@@ -307,10 +333,57 @@ impl DocState {
 
         let resolved = self.doc.resolve(from);
 
+        // ── Atomic block handling ─────────────────────────────────────
+        //
+        // Case 1: Cursor at a gap position (parent is NOT a textblock).
+        // If the node after the cursor is atomic, delete the entire
+        // atomic block.
+        if !resolved.parent().node_type.is_textblock() {
+            if let Some(node_after) = resolved.node_after() {
+                if node_after.is_atom() {
+                    let atom_size = node_after.node_size();
+                    let delete_to = from + atom_size;
+                    self.push_undo();
+                    let mut tr = Transform::new(self.doc.clone());
+                    if tr.delete(from, delete_to).is_ok() {
+                        self.doc = tr.doc;
+                        self.selection = Selection::cursor(
+                            self.adjust_into_textblock(
+                                from.min(self.doc.content.size())
+                            )
+                        );
+                    }
+                    self.redo_stack.clear();
+                    return;
+                }
+            }
+        }
+
         // Check if cursor is at the end of a textblock's content.
         if resolved.parent().node_type.is_textblock()
             && resolved.parent_offset == resolved.parent().content.size()
         {
+            // At the end of a textblock — check if the next block is atomic.
+            let after_pos = resolved.after(resolved.depth);
+            if after_pos < doc_size {
+                let after_resolved = self.doc.resolve(after_pos);
+                if let Some(next_node) = after_resolved.node_after() {
+                    if next_node.is_atom() {
+                        // Delete the entire atomic block.
+                        let atom_size = next_node.node_size();
+                        let delete_to = after_pos + atom_size;
+                        self.push_undo();
+                        let mut tr = Transform::new(self.doc.clone());
+                        if tr.delete(after_pos, delete_to).is_ok() {
+                            self.doc = tr.doc;
+                            // Cursor stays at current position.
+                        }
+                        self.redo_stack.clear();
+                        return;
+                    }
+                }
+            }
+
             // At the end of a textblock — try to join with the next block
             // (forward join: delete the closing token of current block and
             // opening token of next block).
@@ -453,6 +526,22 @@ impl DocState {
         let before_resolved = self.doc.resolve(before_pos);
         let prev_node = before_resolved.node_before();
         match prev_node {
+            Some(n) if n.is_atom() => {
+                // Atomic block — delete the entire atomic node.
+                let atom_start = before_pos - n.node_size();
+                self.push_undo();
+                let mut tr = Transform::new(self.doc.clone());
+                if tr.delete(atom_start, before_pos).is_ok() {
+                    self.doc = tr.doc;
+                    self.selection = Selection::cursor(
+                        self.adjust_into_textblock(
+                            atom_start.min(self.doc.content.size())
+                        )
+                    );
+                }
+                self.redo_stack.clear();
+                return true;
+            }
             Some(n) if n.node_type.is_textblock() => {
                 // Textblock — will join below.
             }
