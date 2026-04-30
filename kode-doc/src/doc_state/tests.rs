@@ -1527,3 +1527,209 @@ mod paste_replace_test {
         assert!(h1_text.len() > 9, "Should be longer than just 'Dashboard', got: {}", h1_text);
     }
 }
+
+mod atom_tests {
+    use std::collections::HashSet;
+
+    use crate::attrs::code_block_attrs;
+    use crate::doc_state::*;
+    use crate::fragment::Fragment;
+    use crate::node::Node;
+    use crate::node_type::NodeType;
+
+    /// Helper: create a set of atomic languages from string slices.
+    fn atomic_set(langs: &[&str]) -> HashSet<String> {
+        langs.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── is_atom defaults ──────────────────────────────────────────────
+
+    #[test]
+    fn node_is_not_atom_by_default() {
+        let text = Node::new_text("hello");
+        assert!(!text.is_atom());
+
+        let p = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("hello")),
+        );
+        assert!(!p.is_atom());
+
+        let cb = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("rust"),
+            Fragment::from_node(Node::new_text("let x = 1;")),
+        );
+        assert!(!cb.is_atom());
+    }
+
+    // ── Matching language marks CodeBlock as atomic ────────────────────
+
+    #[test]
+    fn code_block_with_matching_language_is_atomic() {
+        let md = "```chartml\ntype: bar\n```";
+        let state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml"]));
+
+        let cb = state.doc().child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        assert!(cb.is_atom(), "CodeBlock with matching language should be atomic");
+    }
+
+    #[test]
+    fn code_block_with_non_matching_language_is_not_atomic() {
+        let md = "```rust\nlet x = 1;\n```";
+        let state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml"]));
+
+        let cb = state.doc().child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        assert!(!cb.is_atom(), "CodeBlock with non-matching language should not be atomic");
+    }
+
+    #[test]
+    fn code_block_without_language_is_not_atomic() {
+        let md = "```\nsome content\n```";
+        let state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml"]));
+
+        let cb = state.doc().child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        assert!(!cb.is_atom(), "CodeBlock without language should not be atomic");
+    }
+
+    // ── Multiple atomic languages ────────────────────────────────────
+
+    #[test]
+    fn multiple_atomic_languages_all_marked() {
+        let md = "```chartml\ntype: bar\n```\n\n```mermaid\ngraph TD\n```\n\n```rust\nfn main() {}\n```";
+        let state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml", "mermaid"]));
+
+        let chartml_block = state.doc().child(0);
+        assert_eq!(chartml_block.node_type, NodeType::CodeBlock);
+        assert!(chartml_block.is_atom(), "chartml block should be atomic");
+
+        let mermaid_block = state.doc().child(1);
+        assert_eq!(mermaid_block.node_type, NodeType::CodeBlock);
+        assert!(mermaid_block.is_atom(), "mermaid block should be atomic");
+
+        let rust_block = state.doc().child(2);
+        assert_eq!(rust_block.node_type, NodeType::CodeBlock);
+        assert!(!rust_block.is_atom(), "rust block should not be atomic");
+    }
+
+    // ── Non-CodeBlock nodes are never atomic ─────────────────────────
+
+    #[test]
+    fn paragraph_is_never_atomic() {
+        let md = "Hello world";
+        let state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml"]));
+
+        let p = state.doc().child(0);
+        assert_eq!(p.node_type, NodeType::Paragraph);
+        assert!(!p.is_atom(), "Paragraphs should never be atomic");
+    }
+
+    #[test]
+    fn heading_is_never_atomic() {
+        let h = Node::branch_with_attrs(
+            NodeType::Heading,
+            crate::attrs::heading_attrs(1),
+            Fragment::from_node(Node::new_text("Title")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(h));
+        let state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml"]));
+
+        let heading = state.doc().child(0);
+        assert_eq!(heading.node_type, NodeType::Heading);
+        assert!(!heading.is_atom(), "Headings should never be atomic");
+    }
+
+    // ── set_from_markdown re-applies atom marking ────────────────────
+
+    #[test]
+    fn set_from_markdown_re_marks_atoms() {
+        let md1 = "Hello world";
+        let mut state = DocState::from_markdown_with_atoms(md1, atomic_set(&["chartml"]));
+
+        // Initially no CodeBlock, nothing atomic.
+        assert!(!state.doc().child(0).is_atom());
+
+        // Replace with markdown that has a matching code block.
+        let md2 = "```chartml\ntype: line\n```";
+        state.set_from_markdown(md2);
+
+        let cb = state.doc().child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        assert!(cb.is_atom(), "set_from_markdown should re-mark atoms");
+    }
+
+    #[test]
+    fn set_from_markdown_clears_atoms_when_language_changes() {
+        let md1 = "```chartml\ntype: bar\n```";
+        let mut state = DocState::from_markdown_with_atoms(md1, atomic_set(&["chartml"]));
+        assert!(state.doc().child(0).is_atom());
+
+        // Replace with a non-matching code block.
+        let md2 = "```rust\nlet x = 1;\n```";
+        state.set_from_markdown(md2);
+
+        let cb = state.doc().child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        assert!(!cb.is_atom(), "atom flag should be cleared for non-matching language");
+    }
+
+    // ── Empty atomic_languages set marks nothing ─────────────────────
+
+    #[test]
+    fn empty_atomic_languages_marks_nothing() {
+        let md = "```chartml\ntype: bar\n```";
+        let state = DocState::from_markdown_with_atoms(md, HashSet::new());
+
+        let cb = state.doc().child(0);
+        assert!(!cb.is_atom(), "empty atomic_languages should mark nothing");
+    }
+
+    // ── from_markdown (no atoms) still works ─────────────────────────
+
+    #[test]
+    fn from_markdown_without_atoms_never_marks_atomic() {
+        let md = "```chartml\ntype: bar\n```";
+        let state = DocState::from_markdown(md);
+
+        let cb = state.doc().child(0);
+        assert!(!cb.is_atom(), "from_markdown should never mark anything atomic");
+    }
+
+    // ── atom field does not affect PartialEq ─────────────────────────
+
+    #[test]
+    fn atom_flag_does_not_affect_equality() {
+        let a = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("type: bar")),
+        );
+        let mut b = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("type: bar")),
+        );
+        b.atom = true;
+
+        assert_eq!(a, b, "atom flag should not affect structural equality");
+    }
+
+    // ── node_size is unchanged by atom flag ──────────────────────────
+
+    #[test]
+    fn atom_flag_does_not_change_node_size() {
+        let mut cb = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("type: bar")),
+        );
+        let size_before = cb.node_size();
+        cb.atom = true;
+        let size_after = cb.node_size();
+
+        assert_eq!(size_before, size_after, "atom flag should not change node_size");
+    }
+}

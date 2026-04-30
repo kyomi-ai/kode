@@ -33,6 +33,13 @@ pub struct Node {
     pub marks: Vec<Mark>,
     /// Text payload (only present on text nodes).
     text: Option<String>,
+    /// Whether this node is atomic (opaque to cursor/editing).
+    ///
+    /// Atomic nodes are extension-rendered blocks (e.g. chart code blocks)
+    /// that the cursor cannot enter. This is a runtime property set by
+    /// `DocState` based on registered extensions — it is NOT serialized
+    /// to markdown and is NOT part of structural equality.
+    pub(crate) atom: bool,
 }
 
 impl Node {
@@ -51,6 +58,7 @@ impl Node {
             content: Fragment::empty(),
             marks: Vec::new(),
             text: Some(text.to_string()),
+            atom: false,
         }
     }
 
@@ -67,6 +75,7 @@ impl Node {
             content: Fragment::empty(),
             marks,
             text: Some(text.to_string()),
+            atom: false,
         }
     }
 
@@ -78,6 +87,7 @@ impl Node {
             content: Fragment::empty(),
             marks: Vec::new(),
             text: None,
+            atom: false,
         }
     }
 
@@ -89,6 +99,7 @@ impl Node {
             content: Fragment::empty(),
             marks: Vec::new(),
             text: None,
+            atom: false,
         }
     }
 
@@ -100,6 +111,7 @@ impl Node {
             content,
             marks: Vec::new(),
             text: None,
+            atom: false,
         }
     }
 
@@ -111,6 +123,7 @@ impl Node {
             content,
             marks: Vec::new(),
             text: None,
+            atom: false,
         }
     }
 
@@ -164,6 +177,15 @@ impl Node {
     /// Returns `true` if this is a text node.
     pub fn is_text(&self) -> bool {
         self.node_type.is_text()
+    }
+
+    /// Returns `true` if this node is atomic (opaque to cursor/editing).
+    ///
+    /// Atomic nodes are extension-rendered blocks whose content cannot be
+    /// entered by the cursor. Determined at runtime by `DocState` based on
+    /// which extensions are registered.
+    pub fn is_atom(&self) -> bool {
+        self.atom
     }
 
     /// Returns the text content of this node, if it is a text node.

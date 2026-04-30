@@ -19,6 +19,9 @@ mod undo;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
+
+use crate::attrs::AttrValue;
 use crate::fragment::Fragment;
 use crate::node::Node;
 use crate::node_type::NodeType;
@@ -43,6 +46,35 @@ fn ensure_min_content(doc: Node) -> Node {
         )
     } else {
         doc
+    }
+}
+
+/// Recursively walk the document tree and mark matching `CodeBlock` nodes
+/// as atomic.
+///
+/// A `CodeBlock` is marked atomic when its `language` attribute is present
+/// in the `atomic_languages` set. This is a runtime property — it does not
+/// affect markdown serialization.
+fn mark_atoms(node: &mut Node, atomic_languages: &HashSet<String>) {
+    if atomic_languages.is_empty() {
+        return;
+    }
+
+    if node.node_type == NodeType::CodeBlock {
+        if let Some(AttrValue::String(lang)) = node
+            .attrs
+            .iter()
+            .find(|(k, _)| k == "language")
+            .map(|(_, v)| v)
+        {
+            if atomic_languages.contains(lang) {
+                node.atom = true;
+            }
+        }
+    }
+
+    for child in node.content.children_mut() {
+        mark_atoms(child, atomic_languages);
     }
 }
 
@@ -140,6 +172,9 @@ pub struct DocState {
     pub(super) undo_stack: Vec<HistoryEntry>,
     /// Redo stack.
     pub(super) redo_stack: Vec<HistoryEntry>,
+    /// Code block languages whose blocks are treated as atomic (opaque to
+    /// cursor and editing). Determined by which extensions are registered.
+    atomic_languages: HashSet<String>,
 }
 
 impl DocState {
@@ -151,18 +186,40 @@ impl DocState {
         Self::from_doc(doc)
     }
 
+    /// Create a new `DocState` from a markdown string with atomic languages.
+    ///
+    /// Code blocks whose language matches a value in `atomic_languages` are
+    /// marked as atomic — their content is opaque to cursor and editing.
+    pub fn from_markdown_with_atoms(
+        markdown: &str,
+        atomic_languages: HashSet<String>,
+    ) -> Self {
+        let doc = parse_markdown(markdown);
+        Self::from_doc_with_atoms(doc, atomic_languages)
+    }
+
     /// Create from an existing document tree.
     ///
     /// If the document has no children, a single empty `Paragraph` is
     /// inserted so the editor always has a valid cursor home. The cursor
     /// is placed at position 1 (inside the first textblock).
     pub fn from_doc(doc: Node) -> Self {
-        let doc = ensure_min_content(doc);
+        Self::from_doc_with_atoms(doc, HashSet::new())
+    }
+
+    /// Create from an existing document tree with atomic languages.
+    ///
+    /// Code blocks whose language matches a value in `atomic_languages` are
+    /// marked as atomic — their content is opaque to cursor and editing.
+    pub fn from_doc_with_atoms(doc: Node, atomic_languages: HashSet<String>) -> Self {
+        let mut doc = ensure_min_content(doc);
+        mark_atoms(&mut doc, &atomic_languages);
         DocState {
             doc,
             selection: Selection::cursor(1),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            atomic_languages,
         }
     }
 
@@ -198,6 +255,7 @@ impl DocState {
     pub fn set_from_markdown(&mut self, markdown: &str) {
         self.push_undo();
         self.doc = ensure_min_content(parse_markdown(markdown));
+        mark_atoms(&mut self.doc, &self.atomic_languages);
         self.selection = Selection::cursor(1);
         self.redo_stack.clear();
     }
