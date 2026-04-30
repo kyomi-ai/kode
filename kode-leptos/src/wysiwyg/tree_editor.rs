@@ -976,31 +976,31 @@ fn count_chars_to_point(
 
     let mut count = 0usize;
 
-    loop {
-        let Some(node) = walker.current_node().dyn_ref::<web_sys::Node>().cloned() else {
-            break;
-        };
+    // Advance to the first text node (currentNode starts at the root element,
+    // which is not a text node despite the SHOW_TEXT filter).
+    if walker.next_node().ok().flatten().is_none() {
+        // No text nodes at all — check element-level offset below.
+    } else {
+        loop {
+            let Some(node) = walker.current_node().dyn_ref::<web_sys::Node>().cloned() else {
+                break;
+            };
 
-        // Check if this text node IS the target.
-        if node == *target_node {
-            // The target_offset is in UTF-16 code units. Convert to char count.
-            if let Some(text) = node.text_content() {
-                let char_offset = utf16_offset_to_char_count(&text, target_offset as usize);
-                count += char_offset;
+            if node == *target_node {
+                if let Some(text) = node.text_content() {
+                    let char_offset = utf16_offset_to_char_count(&text, target_offset as usize);
+                    count += char_offset;
+                }
+                return count;
             }
-            return count;
-        }
 
-        // If target is an element and this text node is a child of the target
-        // at or before the target_offset child index, count appropriately.
+            if let Some(text) = node.text_content() {
+                count += text.chars().count();
+            }
 
-        // Count all chars in this text node and move on.
-        if let Some(text) = node.text_content() {
-            count += text.chars().count();
-        }
-
-        if walker.next_node().ok().flatten().is_none() {
-            break;
+            if walker.next_node().ok().flatten().is_none() {
+                break;
+            }
         }
     }
 

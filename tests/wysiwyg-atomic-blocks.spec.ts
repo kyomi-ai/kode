@@ -64,7 +64,7 @@ test.describe('Atomic Extension Blocks', () => {
     // Click on "Before" paragraph
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Move to end of "Before"
     await page.keyboard.press('End');
@@ -101,7 +101,7 @@ test.describe('Atomic Extension Blocks', () => {
     // past the paragraph end, past the first chart, to the gap between charts
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
     await page.keyboard.press('End');
     await page.waitForTimeout(100);
 
@@ -133,7 +133,7 @@ test.describe('Atomic Extension Blocks', () => {
     // Click on "Keep this"
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Move to start of "Keep this"
     await page.keyboard.press('Home');
@@ -157,7 +157,7 @@ test.describe('Atomic Extension Blocks', () => {
     // Click on "Keep this"
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Move to end of "Keep this"
     await page.keyboard.press('End');
@@ -181,7 +181,7 @@ test.describe('Atomic Extension Blocks', () => {
     // Click on "Before"
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
     await page.keyboard.press('End');
     await page.waitForTimeout(100);
 
@@ -210,7 +210,7 @@ test.describe('Atomic Extension Blocks', () => {
     // First focus the editor
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Click directly on the chart block
     const chartBlock = page.locator('[data-kode-extension="chart-demo"]').first();
@@ -264,7 +264,7 @@ test.describe('Atomic Extension Blocks', () => {
     // Click around, navigate, type
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('End');
     for (let i = 0; i < 10; i++) {
