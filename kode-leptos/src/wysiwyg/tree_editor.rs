@@ -168,47 +168,25 @@ pub fn TreeWysiwygEditor(
         let is_composing = composing.get();
 
         // Compute formatting state for toolbar active buttons.
-        if let Ok(ds) = doc_for_sel.lock() {
+        // Lock must be released before signal writes to avoid recursive-lock panics.
+        let (fmt, ext_states, should_update_ext) = {
+            let Ok(ds) = doc_for_sel.lock() else { return };
             let fmt = ds.formatting_at_cursor();
-
-            if !extensions_for_sel.is_empty() && _v != last_ext_version.get() {
-                last_ext_version.set(_v);
-                let source = ds.to_markdown();
-                let temp_ed = kode_markdown::MarkdownEditor::new(&source);
-                let md_fmt = kode_markdown::FormattingState {
-                    bold: fmt.bold,
-                    italic: fmt.italic,
-                    code: fmt.code,
-                    strikethrough: fmt.strikethrough,
-                    heading_level: fmt.heading_level,
-                    bullet_list: fmt.bullet_list,
-                    ordered_list: fmt.ordered_list,
-                    blockquote: fmt.blockquote,
-                };
-                let cursor_byte = kode_doc::tree_pos_to_byte_offset(
-                    ds.doc(),
-                    &source,
-                    ds.selection().head,
-                );
-                let ctx = crate::extension::ExtensionEditorContext {
-                    editor: temp_ed.editor(),
-                    source: &source,
-                    cursor_byte,
-                    formatting: &md_fmt,
-                };
-                let ext_states: Vec<(String, bool)> = extensions_for_sel
-                    .iter()
-                    .flat_map(|ext| {
-                        ext.active_state(&ctx)
-                            .into_iter()
-                            .map(|(name, active)| (name.to_owned(), active))
-                    })
-                    .collect();
-                extension_active_state.set(ext_states);
-            }
-
-            formatting_state.set(fmt);
+            let should_update = !extensions_for_sel.is_empty() && _v != last_ext_version.get();
+            let ext_states = if should_update {
+                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_sel))
+            } else {
+                None
+            };
+            (fmt, ext_states, should_update)
+        };
+        if should_update_ext {
+            last_ext_version.set(_v);
         }
+        if let Some(states) = ext_states {
+            extension_active_state.set(states);
+        }
+        formatting_state.set(fmt);
 
         // Don't restore selection during composition — it would interrupt IME.
         if is_composing {
@@ -616,6 +594,7 @@ pub fn TreeWysiwygEditor(
     {
         let doc_selchange = doc_state.clone();
         let editor_selchange = editor_ref;
+        let extensions_for_selchange = Arc::clone(&extensions);
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
             if composing.get_untracked() {
                 return;
@@ -634,7 +613,17 @@ pub fn TreeWysiwygEditor(
             let Ok(mut ds) = doc_selchange.lock() else { return };
             sync_selection_to_doc(&mut ds, container_el);
             let fmt = ds.formatting_at_cursor();
+
+            let ext_states = if !extensions_for_selchange.is_empty() {
+                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_selchange))
+            } else {
+                None
+            };
             drop(ds);
+
+            if let Some(states) = ext_states {
+                extension_active_state.set(states);
+            }
             formatting_state.set(fmt);
         });
 
@@ -1201,4 +1190,47 @@ fn char_count_to_utf16_offset(text: &str, char_count: usize) -> usize {
         utf16_offset += ch.len_utf16();
     }
     utf16_offset
+}
+
+/// Compute extension active states from the current DocState and formatting.
+///
+/// Builds the `ExtensionEditorContext` required by `Extension::active_state`,
+/// collecting results into a `Vec<(String, bool)>` suitable for
+/// `extension_active_state.set(...)`.
+fn compute_extension_active_states(
+    ds: &DocState,
+    fmt: &FormattingState,
+    extensions: &[Arc<dyn crate::extension::Extension>],
+) -> Vec<(String, bool)> {
+    let source = ds.to_markdown();
+    let temp_ed = kode_markdown::MarkdownEditor::new(&source);
+    let md_fmt = kode_markdown::FormattingState {
+        bold: fmt.bold,
+        italic: fmt.italic,
+        code: fmt.code,
+        strikethrough: fmt.strikethrough,
+        heading_level: fmt.heading_level,
+        bullet_list: fmt.bullet_list,
+        ordered_list: fmt.ordered_list,
+        blockquote: fmt.blockquote,
+    };
+    let cursor_byte = kode_doc::tree_pos_to_byte_offset(
+        ds.doc(),
+        &source,
+        ds.selection().head,
+    );
+    let ctx = crate::extension::ExtensionEditorContext {
+        editor: temp_ed.editor(),
+        source: &source,
+        cursor_byte,
+        formatting: &md_fmt,
+    };
+    extensions
+        .iter()
+        .flat_map(|ext| {
+            ext.active_state(&ctx)
+                .into_iter()
+                .map(|(name, active)| (name.to_owned(), active))
+        })
+        .collect()
 }
