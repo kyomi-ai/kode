@@ -496,9 +496,9 @@ fn parse_inline_recursive(chars: &[char], marks: &[Mark], out: &mut Vec<Node>) {
                 }
             }
 
-            // Soft line break: single newline → space
             '\n' => {
-                buf.push(' ');
+                flush_text(&mut buf, marks, out);
+                out.push(Node::leaf(NodeType::HardBreak));
                 i += 1;
             }
 
@@ -1196,6 +1196,17 @@ mod tests {
         let para = doc.child(0);
 
         // Should be: "line one" (text), HardBreak, "line two" (text)
+        assert_eq!(para.child_count(), 3);
+        assert_eq!(para.child(0).text(), Some("line one"));
+        assert_eq!(para.child(1).node_type, NodeType::HardBreak);
+        assert_eq!(para.child(2).text(), Some("line two"));
+    }
+
+    #[test]
+    fn parse_bare_newline_as_hard_break() {
+        let doc = parse_markdown("line one\nline two\n");
+        let para = doc.child(0);
+
         assert_eq!(para.child_count(), 3);
         assert_eq!(para.child(0).text(), Some("line one"));
         assert_eq!(para.child(1).node_type, NodeType::HardBreak);
