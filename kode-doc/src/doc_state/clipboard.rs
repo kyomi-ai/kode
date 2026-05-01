@@ -8,7 +8,7 @@ use crate::serialize::serialize_markdown;
 use crate::slice::Slice;
 use crate::transform::Transform;
 
-use super::{DocState, Selection};
+use super::{mark_atoms, DocState, Selection};
 
 impl DocState {
     /// Serialize the selected content to markdown.
@@ -84,6 +84,7 @@ impl DocState {
                 self.doc = tr.doc;
                 self.selection = Selection::cursor(new_pos.min(self.doc.content.size()));
             }
+            mark_atoms(&mut self.doc, &self.atomic_languages);
             self.redo_stack.clear();
             return;
         }
@@ -139,6 +140,7 @@ impl DocState {
         let max_pos = self.doc.content.size();
         let adjusted = self.adjust_into_textblock(pos.min(max_pos));
         self.selection = Selection::cursor(adjusted);
+        mark_atoms(&mut self.doc, &self.atomic_languages);
         self.redo_stack.clear();
     }
 
