@@ -1132,7 +1132,10 @@ fn find_text_point(container: &web_sys::Element, doc_pos: usize) -> Option<(web_
     // Advance past the root element to the first text node.
     // (TreeWalker.currentNode starts at the root element regardless of the
     // SHOW_TEXT filter — only navigation methods like nextNode() respect it.)
-    walker.next_node().ok().flatten()?;
+    if walker.next_node().ok().flatten().is_none() {
+        // No text nodes (empty element) — position cursor inside it.
+        return Some((target_el.unchecked_into::<web_sys::Node>(), 0));
+    }
 
     loop {
         let node = walker.current_node();
