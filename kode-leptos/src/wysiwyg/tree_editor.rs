@@ -10,6 +10,7 @@
 //! `data-pos-end` attributes on block elements, and restored after each
 //! re-render.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use kode_doc::mark::MarkType;
@@ -63,8 +64,14 @@ pub fn TreeWysiwygEditor(
     language_aliases: Vec<(String, String)>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
-    let doc_state = Arc::new(Mutex::new(DocState::from_markdown(
+    let atomic_langs: HashSet<String> = extensions
+        .iter()
+        .flat_map(|ext| ext.code_block_languages())
+        .map(|s| s.to_string())
+        .collect();
+    let doc_state = Arc::new(Mutex::new(DocState::from_markdown_with_atoms(
         &content.get_untracked(),
+        atomic_langs,
     )));
 
     // Reactive version counter — bumped to trigger re-render + selection restore.
