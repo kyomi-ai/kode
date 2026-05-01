@@ -92,14 +92,36 @@ fn serialize_node(node: &Node, out: &mut String, ctx: &BlockContext) {
     }
 }
 
-/// Serialize the block children of a node, joining with `\n\n`.
+fn is_empty_paragraph(node: &Node) -> bool {
+    node.node_type == NodeType::Paragraph && node.content.children().is_empty()
+}
+
+/// Serialize the block children of a node, joining with separators.
+///
+/// Standard blocks are separated by `\n\n`. Empty paragraphs (representing
+/// visible blank lines) produce no serialized content but reduce the
+/// following separator to a single `\n`, ensuring correct roundtrip for
+/// multiple consecutive blank lines.
 fn serialize_block_children(node: &Node, out: &mut String, ctx: &BlockContext) {
     let children = node.content.children();
     for (i, child) in children.iter().enumerate() {
+        let is_empty_para =
+            is_empty_paragraph(child);
+
         if i > 0 {
-            out.push_str("\n\n");
+            let prev = &children[i - 1];
+            let prev_is_empty =
+                is_empty_paragraph(prev);
+            if prev_is_empty {
+                out.push('\n');
+            } else {
+                out.push_str("\n\n");
+            }
         }
-        serialize_node(child, out, ctx);
+
+        if !is_empty_para {
+            serialize_node(child, out, ctx);
+        }
     }
 }
 
@@ -458,14 +480,30 @@ fn reverse_pos_map_node(node: &Node, state: &mut ReversePosMapState) {
             let children = node.content.children();
             for (i, child) in children.iter().enumerate() {
                 if i > 0 {
-                    state.byte_offset += 2; // "\n\n"
+                    let prev = &children[i - 1];
+                    let prev_is_empty = is_empty_paragraph(prev);
+                    if prev_is_empty {
+                        state.byte_offset += 1; // "\n"
+                    } else {
+                        state.byte_offset += 2; // "\n\n"
+                    }
                     if state.check() {
                         return;
                     }
                 }
-                reverse_pos_map_node(child, state);
-                if state.found.is_some() {
-                    return;
+                let is_empty_para = is_empty_paragraph(child);
+                if is_empty_para {
+                    // Empty paragraphs produce no serialized content but
+                    // still occupy tree positions (open + close tokens).
+                    state.tree_pos += 2;
+                    if state.check() {
+                        return;
+                    }
+                } else {
+                    reverse_pos_map_node(child, state);
+                    if state.found.is_some() {
+                        return;
+                    }
                 }
             }
         }
@@ -646,16 +684,32 @@ fn pos_map_node(node: &Node, state: &mut PosMapState) {
     match node.node_type {
         NodeType::Doc => {
             // Doc has no opening/closing tokens in the position space.
-            // Its children are separated by "\n\n" in the serialized output.
+            // Children are separated by "\n\n" normally, or "\n" when the
+            // previous child is an empty paragraph (visible blank line).
             let children = node.content.children();
             for (i, child) in children.iter().enumerate() {
                 if i > 0 {
-                    // "\n\n" between blocks — bytes but no tree positions.
-                    state.byte_offset += 2;
+                    let prev = &children[i - 1];
+                    let prev_is_empty = is_empty_paragraph(prev);
+                    if prev_is_empty {
+                        state.byte_offset += 1; // "\n"
+                    } else {
+                        state.byte_offset += 2; // "\n\n"
+                    }
                 }
-                pos_map_node(child, state);
-                if state.found.is_some() {
-                    return;
+                let is_empty_para = is_empty_paragraph(child);
+                if is_empty_para {
+                    // Empty paragraphs produce no serialized content but
+                    // still occupy tree positions (open + close tokens).
+                    state.tree_pos += 2;
+                    if state.check() {
+                        return;
+                    }
+                } else {
+                    pos_map_node(child, state);
+                    if state.found.is_some() {
+                        return;
+                    }
                 }
             }
         }
@@ -1251,6 +1305,30 @@ mod tests {
         let input = "![alt text](image.png)";
         let tree = parse_markdown(input);
         let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn round_trip_blank_lines() {
+        let input = "Hello\n\n\n\nasdasd";
+        let doc = parse_markdown(input);
+        let output = serialize_markdown(&doc);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn round_trip_single_blank_line() {
+        let input = "AAA\n\n\nBBB";
+        let doc = parse_markdown(input);
+        let output = serialize_markdown(&doc);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn round_trip_no_blank_lines() {
+        let input = "First\n\nSecond";
+        let doc = parse_markdown(input);
+        let output = serialize_markdown(&doc);
         assert_eq!(output, input);
     }
 
