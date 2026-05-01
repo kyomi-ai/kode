@@ -114,27 +114,6 @@ pub trait Extension: Send + Sync {
         vec![]
     }
 
-    // ── Context for mounted views ──────────────────────────────────
-
-    /// Provide Leptos contexts that `render_code_block` views need.
-    ///
-    /// Called under the parent reactive owner (where `provide_context` was
-    /// originally called) before extension views are mounted into the
-    /// contenteditable HTML. The extension should read any contexts its
-    /// views depend on and return a boxed closure that re-provides them.
-    /// The closure is called under each mounted view's fresh `Owner` so
-    /// the contexts are available to descendant components via `use_context`.
-    ///
-    /// The returned closure must be callable multiple times (`Fn`, not
-    /// `FnOnce`) because a single fenced block may contain multiple charts
-    /// and the context must be replayed for each.
-    ///
-    /// The default implementation does nothing — extensions that don't rely
-    /// on Leptos context can ignore this method.
-    fn capture_context(&self) -> Option<Box<dyn Fn()>> {
-        None
-    }
-
     // ── Render pass ───────────────────────────────────────────────
 
     /// Called before each render pass of the document tree.

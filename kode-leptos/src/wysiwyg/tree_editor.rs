@@ -61,6 +61,12 @@ pub fn TreeWysiwygEditor(
     /// Map custom code-block language names to built-in highlighter languages.
     #[prop(default = vec![])]
     language_aliases: Vec<(String, String)>,
+    /// Context setup for extension views. Called under each mounted extension
+    /// view's reactive `Owner` before `render_code_block`, so the closure can
+    /// call `provide_context(...)` to make framework-level contexts (providers,
+    /// cache backends, etc.) available to the rendered components.
+    #[prop(optional)]
+    extension_context: Option<Arc<dyn Fn() + Send + Sync>>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
     let doc_state = Arc::new(Mutex::new(DocState::from_markdown(
@@ -196,14 +202,7 @@ pub fn TreeWysiwygEditor(
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
         let exts_raf = Arc::clone(&extensions_for_effect);
-
-        // Capture extension contexts now (under the live reactive owner)
-        // so they can be replayed under each mounted view's fresh Owner.
-        let captured_contexts: Vec<Box<dyn Fn()>> = extensions_for_effect
-            .iter()
-            .filter_map(|ext| ext.capture_context())
-            .collect();
-        let contexts_wrapper = send_wrapper::SendWrapper::new(captured_contexts);
+        let ext_ctx = extension_context.clone();
 
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
@@ -222,8 +221,7 @@ pub fn TreeWysiwygEditor(
                 restore_range(container_el, anchor, head);
             }
 
-            let contexts = contexts_wrapper.take();
-            mount_extension_views(container_el, &exts_raf, contexts);
+            mount_extension_views(container_el, &exts_raf, ext_ctx.as_deref());
         });
         let _ = web_sys::window()
             .and_then(|w| w.request_animation_frame(cb.as_ref().unchecked_ref()).ok());
@@ -1297,7 +1295,7 @@ fn compute_extension_active_states(
 fn mount_extension_views(
     container: &web_sys::Element,
     extensions: &[Arc<dyn crate::extension::Extension>],
-    captured_contexts: Vec<Box<dyn Fn()>>,
+    extension_context: Option<&(dyn Fn() + Send + Sync)>,
 ) {
     if extensions.is_empty() {
         return;
@@ -1338,7 +1336,7 @@ fn mount_extension_views(
 
         let owner = Owner::new();
         let result = owner.with(|| {
-            for ctx_fn in &captured_contexts {
+            if let Some(ctx_fn) = extension_context {
                 ctx_fn();
             }
             ext.render_code_block(&lang, &content, pos_start, pos_end)
