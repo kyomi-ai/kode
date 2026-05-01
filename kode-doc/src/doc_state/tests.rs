@@ -2396,4 +2396,31 @@ mod atom_tests {
         assert_eq!(state.doc.child(2).node_type, NodeType::Paragraph);
         assert_eq!(state.doc.child(2).text_content(), "");
     }
+
+    // ── Clipboard roundtrip preserves atomicity ──────────────────────
+
+    #[test]
+    fn insert_from_markdown_marks_pasted_atomic_block() {
+        let mut state = DocState::from_markdown_with_atoms("Hello", atomic_set(&["chartml"]));
+        state.selection = Selection::cursor(state.doc.content.size());
+        state.insert_from_markdown("```chartml\ntype: line\n```");
+
+        let cb = state.doc.content.iter()
+            .find(|n| n.node_type == NodeType::CodeBlock)
+            .expect("pasted CodeBlock not found");
+        assert!(cb.is_atom(), "pasted chartml block should be marked atomic");
+    }
+
+    #[test]
+    fn insert_from_markdown_preserves_existing_atomic_blocks() {
+        let md = "```chartml\ntype: bar\n```";
+        let mut state = DocState::from_markdown_with_atoms(md, atomic_set(&["chartml"]));
+
+        assert!(state.doc.child(0).is_atom(), "initial chartml block must be atomic");
+
+        state.selection = Selection::cursor(state.doc.content.size());
+        state.insert_from_markdown("More text");
+
+        assert!(state.doc.child(0).is_atom(), "pre-existing chartml block must stay atomic after paste");
+    }
 }
