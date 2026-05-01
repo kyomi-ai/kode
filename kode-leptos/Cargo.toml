@@ -41,6 +41,8 @@ web-sys = { version = "0.3", features = [
     "Node",
     "NodeList",
     "Range",
+    "Selection",
+    "TreeWalker",
     "WheelEvent",
     "FocusEvent",
     "CompositionEvent",

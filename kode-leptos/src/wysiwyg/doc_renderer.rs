@@ -626,6 +626,329 @@ fn match_language(info: &str, aliases: &[(String, String)]) -> Language {
     highlight::language_from_info_string(&resolved)
 }
 
+// ── String-based HTML renderer (for contenteditable) ────────────────────
+
+/// Render a kode-doc document tree into an HTML string for use with
+/// `contenteditable`. Each block element gets `data-pos-start` and
+/// `data-pos-end` attributes for selection mapping.
+///
+/// **Safety note about inner_html**: Text content is HTML-escaped via
+/// `html_escape()` during rendering, so user-authored markdown cannot
+/// inject raw HTML. This makes the output safe for use with `inner_html`
+/// on the contenteditable div.
+pub fn doc_to_html(
+    doc: &Node,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) -> String {
+    let mut html = String::new();
+    let mut pos = 0; // content_start = 0
+
+    for child in doc.content.iter() {
+        block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+        pos += child.node_size();
+    }
+
+    html
+}
+
+/// Render a single block-level node to an HTML string.
+fn block_node_to_html(
+    html: &mut String,
+    node: &Node,
+    start: usize,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) {
+    let content_start = start + 1;
+    let content_end = content_start + node.content.size();
+
+    match node.node_type {
+        // ── Paragraph ────────────────────────────────────────────────
+        NodeType::Paragraph => {
+            let inline = render_inline_content(&node.content);
+            html.push_str(&format!(
+                "<p class=\"wysiwyg-paragraph\" data-pos-start=\"{}\" data-pos-end=\"{}\">{}</p>",
+                content_start, content_end, inline
+            ));
+        }
+
+        // ── Heading ──────────────────────────────────────────────────
+        NodeType::Heading => {
+            let level = match get_attr(&node.attrs, "level") {
+                Some(AttrValue::Int(n)) => *n as u8,
+                _ => 1,
+            };
+            let level = level.clamp(1, 6);
+            let inline = render_inline_content(&node.content);
+            html.push_str(&format!(
+                "<h{level} class=\"wysiwyg-heading wysiwyg-h{level}\" data-pos-start=\"{cs}\" data-pos-end=\"{ce}\">{inline}</h{level}>",
+                level = level,
+                cs = content_start,
+                ce = content_end,
+                inline = inline,
+            ));
+        }
+
+        // ── Blockquote ───────────────────────────────────────────────
+        NodeType::Blockquote => {
+            html.push_str(&format!(
+                "<blockquote class=\"wysiwyg-blockquote\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                content_start, content_end
+            ));
+            block_children_to_html(html, &node.content, content_start, extensions, language_aliases);
+            html.push_str("</blockquote>");
+        }
+
+        // ── Bullet list ──────────────────────────────────────────────
+        NodeType::BulletList => {
+            html.push_str(&format!(
+                "<ul class=\"wysiwyg-list wysiwyg-bullet-list\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                content_start, content_end
+            ));
+            list_items_to_html(html, &node.content, content_start, extensions, language_aliases);
+            html.push_str("</ul>");
+        }
+
+        // ── Ordered list ─────────────────────────────────────────────
+        NodeType::OrderedList => {
+            let start_num = match get_attr(&node.attrs, "start") {
+                Some(AttrValue::Int(n)) => *n as i32,
+                _ => 1,
+            };
+            html.push_str(&format!(
+                "<ol class=\"wysiwyg-list wysiwyg-ordered-list\" start=\"{}\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                start_num, content_start, content_end
+            ));
+            list_items_to_html(html, &node.content, content_start, extensions, language_aliases);
+            html.push_str("</ol>");
+        }
+
+        // ── Code block ──────────────────────────────────────────────
+        NodeType::CodeBlock => {
+            let lang = match get_attr(&node.attrs, "language") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let content_text = node.text_content();
+
+            // Check if any extension handles this language — render as
+            // an atomic contenteditable="false" block instead of an
+            // editable syntax-highlighted code block.
+            let is_extension = extensions
+                .iter()
+                .any(|ext| ext.code_block_languages().contains(&lang));
+
+            if is_extension {
+                let escaped_content = html_escape(&content_text);
+                let escaped_lang = html_escape(lang);
+                html.push_str(&format!(
+                    "<div contenteditable=\"false\" class=\"kode-extension-block\" \
+                     data-kode-extension=\"{ext}\" \
+                     data-pos-start=\"{start}\" data-pos-end=\"{end}\">\
+                     <div class=\"kode-extension-content\">{content}</div>\
+                     </div>",
+                    ext = escaped_lang,
+                    start = content_start,
+                    end = content_end,
+                    content = escaped_content,
+                ));
+            } else {
+                // Default: syntax-highlighted code block
+                let highlight_lang = match_language(lang, language_aliases);
+                let highlighted_lines: Vec<String> = content_text
+                    .lines()
+                    .map(|line| highlight::highlight_line(line, &highlight_lang))
+                    .collect();
+                let mut code_html = highlighted_lines.join("\n");
+                if content_text.ends_with('\n') {
+                    code_html.push('\n');
+                }
+
+                // Render as a single <pre> with the language as a data
+                // attribute. The language label is rendered via CSS
+                // ::before so it doesn't create a cursor trap between
+                // the label and the code content.
+                let lang_attr = if lang.is_empty() {
+                    String::new()
+                } else {
+                    format!(" data-lang=\"{}\"", html_escape(lang))
+                };
+                // NOTE: highlight_line() HTML-escapes source text before wrapping in <span> tags
+                html.push_str(&format!(
+                    "<pre class=\"wysiwyg-code-block kode-content\" \
+                     data-pos-start=\"{cs}\" data-pos-end=\"{ce}\"{lang_attr}>\
+                     <code>{code}</code></pre>",
+                    cs = content_start,
+                    ce = content_end,
+                    lang_attr = lang_attr,
+                    code = code_html,
+                ));
+            }
+        }
+
+        // ── Horizontal rule ──────────────────────────────────────────
+        NodeType::HorizontalRule => {
+            html.push_str(&format!(
+                "<hr class=\"wysiwyg-hr\" data-pos-start=\"{}\" data-pos-end=\"{}\" />",
+                start, start + 1
+            ));
+        }
+
+        // ── Table ────────────────────────────────────────────────────
+        NodeType::Table => {
+            html.push_str(&format!(
+                "<table class=\"wysiwyg-table\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                content_start, content_end
+            ));
+            table_rows_to_html(html, &node.content, content_start);
+            html.push_str("</table>");
+        }
+
+        // Table sub-nodes at top level (should not happen)
+        NodeType::TableRow | NodeType::TableHeader | NodeType::TableCell => {}
+
+        // Inline-only types at block level (should not happen)
+        NodeType::Text | NodeType::HardBreak | NodeType::Image => {}
+
+        // Doc (nested — should not happen, but handle gracefully)
+        NodeType::Doc => {
+            block_children_to_html(html, &node.content, content_start, extensions, language_aliases);
+        }
+
+        // ListItem at top level (should not happen outside a list)
+        NodeType::ListItem => {
+            let children_html = list_item_content_to_html(node, content_start, extensions, language_aliases);
+            html.push_str(&format!(
+                "<li class=\"wysiwyg-list-item\" data-pos-start=\"{}\" data-pos-end=\"{}\">{}</li>",
+                content_start, content_end, children_html
+            ));
+        }
+    }
+}
+
+/// Render all block-level children of a fragment to HTML.
+fn block_children_to_html(
+    html: &mut String,
+    content: &Fragment,
+    content_start: usize,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) {
+    let mut pos = content_start;
+    for child in content.iter() {
+        block_node_to_html(html, child, pos, extensions, language_aliases);
+        pos += child.node_size();
+    }
+}
+
+/// Render list items to HTML.
+fn list_items_to_html(
+    html: &mut String,
+    content: &Fragment,
+    content_start: usize,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) {
+    let mut pos = content_start;
+    for child in content.iter() {
+        if child.node_type == NodeType::ListItem {
+            let item_content_start = pos + 1;
+            let item_content_end = item_content_start + child.content.size();
+            let children_html = list_item_content_to_html(child, item_content_start, extensions, language_aliases);
+            html.push_str(&format!(
+                "<li class=\"wysiwyg-list-item\" data-pos-start=\"{}\" data-pos-end=\"{}\">{}</li>",
+                item_content_start, item_content_end, children_html
+            ));
+        }
+        pos += child.node_size();
+    }
+}
+
+/// Render list item content to an HTML string.
+///
+/// Paragraphs inside list items are rendered as `<span>` (not `<p>`)
+/// to match the existing view-based renderer.
+fn list_item_content_to_html(
+    list_item: &Node,
+    content_start: usize,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) -> String {
+    let mut html = String::new();
+    let mut pos = content_start;
+
+    for child in list_item.content.iter() {
+        match child.node_type {
+            NodeType::Paragraph => {
+                let child_content_start = pos + 1;
+                let child_content_end = child_content_start + child.content.size();
+                let inline = render_inline_content(&child.content);
+                html.push_str(&format!(
+                    "<span data-pos-start=\"{}\" data-pos-end=\"{}\">{}</span>",
+                    child_content_start, child_content_end, inline
+                ));
+            }
+            _ => {
+                block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+            }
+        }
+        pos += child.node_size();
+    }
+
+    html
+}
+
+/// Render table rows to HTML.
+fn table_rows_to_html(html: &mut String, content: &Fragment, content_start: usize) {
+    let mut pos = content_start;
+
+    for child in content.iter() {
+        let row_content_start = pos + 1;
+        let row_content_end = row_content_start + child.content.size();
+
+        match child.node_type {
+            NodeType::TableHeader => {
+                html.push_str(&format!(
+                    "<thead data-pos-start=\"{}\" data-pos-end=\"{}\"><tr class=\"wysiwyg-table-row\">",
+                    row_content_start, row_content_end
+                ));
+                table_cells_to_html(html, child, row_content_start, "th");
+                html.push_str("</tr></thead>");
+            }
+            NodeType::TableRow => {
+                html.push_str(&format!(
+                    "<tr class=\"wysiwyg-table-row\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                    row_content_start, row_content_end
+                ));
+                table_cells_to_html(html, child, row_content_start, "td");
+                html.push_str("</tr>");
+            }
+            _ => {}
+        }
+        pos += child.node_size();
+    }
+}
+
+/// Render table cells to HTML.
+fn table_cells_to_html(html: &mut String, row: &Node, content_start: usize, tag: &str) {
+    let mut pos = content_start;
+
+    for cell in row.content.iter() {
+        let cell_content_start = pos + 1;
+        let cell_content_end = cell_content_start + cell.content.size();
+        let inline = render_inline_content(&cell.content);
+        html.push_str(&format!(
+            "<{tag} class=\"wysiwyg-table-cell\" data-pos-start=\"{cs}\" data-pos-end=\"{ce}\">{inline}</{tag}>",
+            tag = tag,
+            cs = cell_content_start,
+            ce = cell_content_end,
+            inline = inline,
+        ));
+        pos += cell.node_size();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -998,5 +1321,178 @@ mod tests {
     fn match_language_alias_case_insensitive_target() {
         let aliases = vec![("chartml".to_string(), "YAML".to_string())];
         assert_eq!(match_language("chartml", &aliases), lang("yaml"));
+    }
+
+    // ── doc_to_html tests ──────────────────────────────────────────
+
+    #[test]
+    fn doc_to_html_paragraph() {
+        let para = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Hello")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(para));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("class=\"wysiwyg-paragraph\""));
+        assert!(html.contains("data-pos-start=\"1\""));
+        assert!(html.contains("Hello"));
+    }
+
+    #[test]
+    fn doc_to_html_heading() {
+        let heading = Node::branch_with_attrs(
+            NodeType::Heading,
+            heading_attrs(2),
+            Fragment::from_node(Node::new_text("Title")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(heading));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<h2"));
+        assert!(html.contains("wysiwyg-h2"));
+        assert!(html.contains("Title"));
+        assert!(html.contains("</h2>"));
+    }
+
+    #[test]
+    fn doc_to_html_bullet_list() {
+        let item = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("item 1")),
+            )),
+        );
+        let list = Node::branch(
+            NodeType::BulletList,
+            Fragment::from_node(item),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<ul"));
+        assert!(html.contains("wysiwyg-bullet-list"));
+        assert!(html.contains("<li"));
+        assert!(html.contains("item 1"));
+    }
+
+    #[test]
+    fn doc_to_html_code_block() {
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("sql"),
+            Fragment::from_node(Node::new_text("SELECT 1")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("wysiwyg-code-block"));
+        // Language label is now a data attribute, rendered via CSS ::before
+        assert!(html.contains("data-lang=\"sql\""));
+        // Text may be wrapped in highlight spans (e.g. "<a-k>SELECT</a-k>")
+        assert!(html.contains("SELECT"));
+        assert!(html.contains("1"));
+    }
+
+    #[test]
+    fn doc_to_html_extension_code_block() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("title: Revenue\ntype: bar")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let html = doc_to_html(&doc, &[ext], &[]);
+
+        // Extension blocks get contenteditable="false"
+        assert!(html.contains("contenteditable=\"false\""));
+        // Extension blocks have the kode-extension-block class
+        assert!(html.contains("kode-extension-block"));
+        // Extension name is stored in data-kode-extension
+        assert!(html.contains("data-kode-extension=\"chart\""));
+        // Raw content is present
+        assert!(html.contains("title: Revenue"));
+        assert!(html.contains("type: bar"));
+        // Should NOT have the regular code block class structure
+        assert!(!html.contains("<code>"));
+    }
+
+    #[test]
+    fn doc_to_html_non_extension_code_block_ignores_extensions() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        // A "sql" code block should render normally even with extensions present
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("sql"),
+            Fragment::from_node(Node::new_text("SELECT 1")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let html = doc_to_html(&doc, &[ext], &[]);
+
+        assert!(html.contains("wysiwyg-code-block"));
+        assert!(html.contains("<code>"));
+        assert!(!html.contains("contenteditable=\"false\""));
+        assert!(!html.contains("kode-extension-block"));
+    }
+
+    #[test]
+    fn doc_to_html_hr() {
+        let hr = Node::leaf(NodeType::HorizontalRule);
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(hr));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<hr"));
+        assert!(html.contains("wysiwyg-hr"));
+    }
+
+    #[test]
+    fn doc_to_html_blockquote() {
+        let bq = Node::branch(
+            NodeType::Blockquote,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("quoted")),
+            )),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(bq));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<blockquote"));
+        assert!(html.contains("wysiwyg-blockquote"));
+        assert!(html.contains("quoted"));
+    }
+
+    #[test]
+    fn doc_to_html_inline_marks() {
+        let para = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_vec(vec![
+                Node::new_text("hello "),
+                Node::new_text_with_marks("bold", vec![Mark::new(MarkType::Strong)]),
+            ]),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(para));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<strong>bold</strong>"));
+    }
+
+    #[test]
+    fn doc_to_html_escapes_text() {
+        let para = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("<script>alert('xss')</script>")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(para));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(!html.contains("<script>"));
+        assert!(html.contains("&lt;script&gt;"));
     }
 }

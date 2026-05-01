@@ -59,7 +59,7 @@ test.describe('Cursor Position and Formatting', () => {
     // Click on the paragraph text
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Move to end and type
     await page.keyboard.press('End');
@@ -75,7 +75,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('Home');
     await page.keyboard.type('Hello ');
@@ -90,7 +90,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
@@ -168,8 +168,8 @@ test.describe('Cursor Position and Formatting', () => {
 
     const codeBlock = page.locator('.wysiwyg-container .wysiwyg-code-block');
     await expect(codeBlock).toBeVisible();
-    const pre = page.locator('.wysiwyg-container .wysiwyg-code-block pre');
-    await expect(pre).toBeVisible();
+    const code = page.locator('.wysiwyg-container .wysiwyg-code-block code');
+    await expect(code).toBeVisible();
   });
 
   test('horizontal rule renders', async ({ page }) => {
@@ -192,7 +192,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Select "text"
     await page.keyboard.press('Home');
@@ -213,7 +213,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('Home');
     for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
@@ -235,7 +235,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     // Click on the bold text
     await strong.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Type after "world" — should end up inside the bold markers
     await page.keyboard.press('End'); // end of bold
@@ -257,7 +257,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const h1 = page.locator('.wysiwyg-container h1');
     await h1.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
@@ -283,7 +283,7 @@ test.describe('Cursor Position and Formatting', () => {
     // Click on second paragraph
     const secondP = paragraphs.nth(initialCount - 1);
     await secondP.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('Home');
     await page.keyboard.press('Backspace');
@@ -300,7 +300,7 @@ test.describe('Cursor Position and Formatting', () => {
     // Click on second list item
     const items = page.locator('.wysiwyg-container li');
     await items.nth(1).click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('Tab');
     await page.waitForTimeout(200);
@@ -317,7 +317,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Rapid typing
     await page.keyboard.type('The quick brown fox jumps over the lazy dog. ', { delay: 10 });
@@ -335,7 +335,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.type('Edited in WYSIWYG');
     await page.waitForTimeout(200);
@@ -350,7 +350,7 @@ test.describe('Cursor Position and Formatting', () => {
 
     // Edit again
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
     await page.keyboard.type(' more text');
     await page.waitForTimeout(200);
 
@@ -366,31 +366,15 @@ test.describe('Cursor Position and Formatting', () => {
 
     const p = page.locator('.wysiwyg-container p').first();
     await p.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('End');
-
-    // Record cursor top position while on "Hello"
-    const cursorTopBefore = await page.evaluate(() => {
-      const cursor = document.querySelector('.kode-cursor') as HTMLElement;
-      if (!cursor || !cursor.style.top) return -1;
-      return parseFloat(cursor.style.top);
-    });
-
     await page.keyboard.press('Enter');
     await page.waitForTimeout(200);
 
     // Two paragraphs must be visible before any typing
     const paragraphs = page.locator('.wysiwyg-container p');
     expect(await paragraphs.count()).toBe(2);
-
-    // The cursor must have moved DOWN to the new empty line
-    const cursorTopAfter = await page.evaluate(() => {
-      const cursor = document.querySelector('.kode-cursor') as HTMLElement;
-      if (!cursor || !cursor.style.top) return -1;
-      return parseFloat(cursor.style.top);
-    });
-    expect(cursorTopAfter).toBeGreaterThan(cursorTopBefore);
 
     // Type without clicking — text must appear as the second paragraph
     await page.keyboard.type('World');
@@ -441,7 +425,7 @@ test.describe('Cursor Position and Formatting', () => {
     // clicking at y+2 could land on either rope line depending on x position.
     const box = await p.boundingBox();
     await page.mouse.click(box.x + 5, box.y + 2);
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // From wherever the click landed, press End to move to end of CURRENT rope line.
     // With the fix, this is end of line 0. Without it, a misplaced click could

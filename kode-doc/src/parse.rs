@@ -50,8 +50,22 @@ pub fn parse_markdown(source: &str) -> Node {
 fn convert_block_children(node: &arborium_tree_sitter::Node, source: &str) -> Vec<Node> {
     let mut result = Vec::new();
     let mut cursor = node.walk();
+    let mut prev_end_byte: Option<usize> = None;
 
     for child in node.named_children(&mut cursor) {
+        // Insert empty paragraphs for extra blank lines between blocks.
+        // Tree-sitter's paragraph nodes include a trailing `\n`, so the gap
+        // between two standard-separated paragraphs contains only 1 newline
+        // (the second half of the `\n\n` separator). Each additional newline
+        // in the gap represents one visible blank line (empty paragraph).
+        if let Some(prev_end) = prev_end_byte {
+            let gap = &source[prev_end..child.start_byte()];
+            let newline_count = gap.chars().filter(|c| *c == '\n').count();
+            for _ in 0..newline_count.saturating_sub(1) {
+                result.push(Node::branch(NodeType::Paragraph, Fragment::empty()));
+            }
+        }
+
         let kind = child.kind();
         match kind {
             // Flatten containers: recurse into sections instead of wrapping
@@ -64,6 +78,8 @@ fn convert_block_children(node: &arborium_tree_sitter::Node, source: &str) -> Ve
                 }
             }
         }
+
+        prev_end_byte = Some(child.end_byte());
     }
     result
 }
@@ -496,9 +512,9 @@ fn parse_inline_recursive(chars: &[char], marks: &[Mark], out: &mut Vec<Node>) {
                 }
             }
 
-            // Soft line break: single newline → space
             '\n' => {
-                buf.push(' ');
+                flush_text(&mut buf, marks, out);
+                out.push(Node::leaf(NodeType::HardBreak));
                 i += 1;
             }
 
@@ -979,6 +995,37 @@ mod tests {
         assert_eq!(text.text(), Some("Hello world"));
     }
 
+    // ── Blank lines between paragraphs ─────────────────────────────
+
+    #[test]
+    fn parse_blank_lines_between_paragraphs() {
+        let doc = parse_markdown("Hello\n\n\n\nasdasd");
+        assert_eq!(doc.child_count(), 4);
+        assert_eq!(doc.child(0).text_content(), "Hello");
+        assert!(doc.child(1).content.children().is_empty());
+        assert!(doc.child(2).content.children().is_empty());
+        assert_eq!(doc.child(3).text_content(), "asdasd");
+    }
+
+    #[test]
+    fn parse_single_blank_line_no_extra_paragraphs() {
+        // Standard paragraph separator: \n\n produces no empty paragraphs
+        let doc = parse_markdown("First\n\nSecond");
+        assert_eq!(doc.child_count(), 2);
+        assert_eq!(doc.child(0).text_content(), "First");
+        assert_eq!(doc.child(1).text_content(), "Second");
+    }
+
+    #[test]
+    fn parse_triple_newline_one_empty_paragraph() {
+        // \n\n\n = standard separator (2) + 1 extra = 1 empty paragraph
+        let doc = parse_markdown("AAA\n\n\nBBB");
+        assert_eq!(doc.child_count(), 3);
+        assert_eq!(doc.child(0).text_content(), "AAA");
+        assert!(doc.child(1).content.children().is_empty());
+        assert_eq!(doc.child(2).text_content(), "BBB");
+    }
+
     // ── Heading ─────────────────────────────────────────────────────
 
     #[test]
@@ -1196,6 +1243,17 @@ mod tests {
         let para = doc.child(0);
 
         // Should be: "line one" (text), HardBreak, "line two" (text)
+        assert_eq!(para.child_count(), 3);
+        assert_eq!(para.child(0).text(), Some("line one"));
+        assert_eq!(para.child(1).node_type, NodeType::HardBreak);
+        assert_eq!(para.child(2).text(), Some("line two"));
+    }
+
+    #[test]
+    fn parse_bare_newline_as_hard_break() {
+        let doc = parse_markdown("line one\nline two\n");
+        let para = doc.child(0);
+
         assert_eq!(para.child_count(), 3);
         assert_eq!(para.child(0).text(), Some("line one"));
         assert_eq!(para.child(1).node_type, NodeType::HardBreak);

@@ -61,6 +61,16 @@ impl Fragment {
         &self.children
     }
 
+    /// Returns a mutable slice of all child nodes.
+    ///
+    /// Callers must NOT change node sizes or merge-eligibility — doing so
+    /// would invalidate the cached `size` and normalization invariants.
+    /// This is intended for setting runtime flags (e.g. `atom`) that do
+    /// not affect sizing or text merging.
+    pub(crate) fn children_mut(&mut self) -> &mut [Node] {
+        &mut self.children
+    }
+
     /// Returns the number of direct children.
     pub fn child_count(&self) -> usize {
         self.children.len()

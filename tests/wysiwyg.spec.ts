@@ -37,7 +37,7 @@ test.describe('WYSIWYG Editor', () => {
     await container.click();
 
     // Wait for focus
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Get initial text
     const initialText = await page.evaluate(() => {
@@ -60,7 +60,7 @@ test.describe('WYSIWYG Editor', () => {
   test('Enter creates new paragraph', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Count initial paragraphs
     const initialCount = await page.locator('.wysiwyg-container p').count();
@@ -78,7 +78,7 @@ test.describe('WYSIWYG Editor', () => {
   test('Ctrl+Z undoes last action', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Type something
     await page.keyboard.type('UNDO_TEST');
@@ -100,7 +100,7 @@ test.describe('WYSIWYG Editor', () => {
   test('toolbar Bold button works', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Type some text
     await page.keyboard.type('make this bold');
@@ -125,7 +125,7 @@ test.describe('WYSIWYG Editor', () => {
   test('toolbar Italic button works', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.type('make this italic');
     await page.waitForTimeout(200);
@@ -202,7 +202,7 @@ test.describe('WYSIWYG Editor', () => {
     await page.waitForSelector('.wysiwyg-container', { timeout: 10000 });
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Type various things
     await page.keyboard.type('Hello world');
@@ -227,7 +227,7 @@ test.describe('WYSIWYG Editor', () => {
     await page.waitForSelector('.wysiwyg-container', { timeout: 10000 });
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Click each toolbar button
     const buttons = page.locator('.wysiwyg-container button');
@@ -244,7 +244,7 @@ test.describe('WYSIWYG Editor', () => {
   test('Backspace works', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.type('ABCDE');
     await page.waitForTimeout(200);
@@ -267,7 +267,7 @@ test.describe('WYSIWYG Editor', () => {
 
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     // Navigate around
     for (let i = 0; i < 5; i++) {
@@ -292,7 +292,7 @@ test.describe('WYSIWYG Editor', () => {
   test('Ctrl+A selects all', async ({ page }) => {
     const container = page.locator('.wysiwyg-container');
     await container.click();
-    await page.waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA');
+    await page.waitForFunction(() => document.activeElement?.getAttribute?.('contenteditable') === 'true');
 
     await page.keyboard.press('Control+a');
     await page.waitForTimeout(100);

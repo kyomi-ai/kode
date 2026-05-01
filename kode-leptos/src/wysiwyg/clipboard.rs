@@ -4,7 +4,7 @@
 //! and extraction of markdown from our custom `<pre data-kode-md>` wrapper.
 
 /// Minimal HTML escaping for embedding markdown in an HTML attribute/element.
-pub(crate) fn html_escape(s: &str) -> String {
+pub(super) fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
@@ -22,7 +22,7 @@ pub(crate) fn html_escape(s: &str) -> String {
 ///
 /// Returns `None` if the marker is not found. Reverses the HTML escaping
 /// applied by [`html_escape`].
-pub(crate) fn extract_kode_markdown(html: &str) -> Option<String> {
+pub(super) fn extract_kode_markdown(html: &str) -> Option<String> {
     // Find the content between <pre data-kode-md> and </pre>.
     let start_marker = "data-kode-md>";
     let start_idx = html.find(start_marker)? + start_marker.len();

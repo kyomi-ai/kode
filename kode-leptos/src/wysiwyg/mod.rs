@@ -1,10 +1,8 @@
-pub mod click;
-pub mod clipboard;
-pub mod cursor;
 pub mod doc_renderer;
-pub mod dom_helpers;
-pub mod selection;
 pub mod tree_editor;
 
-pub use doc_renderer::render_doc;
+mod clipboard;
+mod dom_helpers;
+
+pub use doc_renderer::{doc_to_html, render_doc};
 pub use tree_editor::TreeWysiwygEditor;
