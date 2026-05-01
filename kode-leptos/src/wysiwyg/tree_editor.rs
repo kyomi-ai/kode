@@ -160,9 +160,9 @@ pub fn TreeWysiwygEditor(
         doc_to_html(ds.doc(), &extensions_for_html, &aliases_for_html)
     });
 
-    // ── Selection restore after re-render ───────────────────────────────
+    // ── Selection restore + extension mounting after re-render ─────────
     let doc_for_sel = doc_state.clone();
-    let extensions_for_sel = Arc::clone(&extensions);
+    let extensions_for_effect = Arc::clone(&extensions);
     Effect::new(move |_| {
         let _v = version.get();
         let is_composing = composing.get();
@@ -172,9 +172,9 @@ pub fn TreeWysiwygEditor(
         let (fmt, ext_states, should_update_ext) = {
             let Ok(ds) = doc_for_sel.lock() else { return };
             let fmt = ds.formatting_at_cursor();
-            let should_update = !extensions_for_sel.is_empty() && _v != last_ext_version.get();
+            let should_update = !extensions_for_effect.is_empty() && _v != last_ext_version.get();
             let ext_states = if should_update {
-                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_sel))
+                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_effect))
             } else {
                 None
             };
@@ -195,6 +195,16 @@ pub fn TreeWysiwygEditor(
 
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
+        let exts_raf = Arc::clone(&extensions_for_effect);
+
+        // Capture extension contexts now (under the live reactive owner)
+        // so they can be replayed under each mounted view's fresh Owner.
+        let captured_contexts: Vec<Box<dyn Fn()>> = extensions_for_effect
+            .iter()
+            .filter_map(|ext| ext.capture_context())
+            .collect();
+        let contexts_wrapper = send_wrapper::SendWrapper::new(captured_contexts);
+
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
             let container_el: &web_sys::Element = container.as_ref();
@@ -211,6 +221,9 @@ pub fn TreeWysiwygEditor(
             } else {
                 restore_range(container_el, anchor, head);
             }
+
+            let contexts = contexts_wrapper.take();
+            mount_extension_views(container_el, &exts_raf, contexts);
         });
         let _ = web_sys::window()
             .and_then(|w| w.request_animation_frame(cb.as_ref().unchecked_ref()).ok());
@@ -621,7 +634,7 @@ pub fn TreeWysiwygEditor(
     {
         let doc_selchange = doc_state.clone();
         let editor_selchange = editor_ref;
-        let extensions_for_selchange = Arc::clone(&extensions);
+        let extensions_for_effectchange = Arc::clone(&extensions);
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
             if composing.get_untracked() {
                 return;
@@ -641,8 +654,8 @@ pub fn TreeWysiwygEditor(
             sync_selection_to_doc(&mut ds, container_el);
             let fmt = ds.formatting_at_cursor();
 
-            let ext_states = if !extensions_for_selchange.is_empty() {
-                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_selchange))
+            let ext_states = if !extensions_for_effectchange.is_empty() {
+                Some(compute_extension_active_states(&ds, &fmt, &extensions_for_effectchange))
             } else {
                 None
             };
@@ -1272,4 +1285,79 @@ fn compute_extension_active_states(
                 .map(|(name, active)| (name.to_owned(), active))
         })
         .collect()
+}
+
+/// Mount live extension views into the placeholder divs created by `doc_to_html`.
+///
+/// The string-based HTML renderer emits `<div class="kode-extension-block"
+/// data-kode-extension="lang" ...>` with the raw content inside a
+/// `<div class="kode-extension-content">` child. This function replaces that
+/// static content with the live Leptos views returned by each extension's
+/// `render_code_block()`.
+fn mount_extension_views(
+    container: &web_sys::Element,
+    extensions: &[Arc<dyn crate::extension::Extension>],
+    captured_contexts: Vec<Box<dyn Fn()>>,
+) {
+    if extensions.is_empty() {
+        return;
+    }
+
+    let Ok(blocks) = container.query_selector_all("div.kode-extension-block[data-kode-extension]")
+    else {
+        return;
+    };
+
+    for i in 0..blocks.length() {
+        let Some(node) = blocks.item(i) else { continue };
+        let block_el: web_sys::Element = node.unchecked_into();
+
+        let lang = block_el
+            .get_attribute("data-kode-extension")
+            .unwrap_or_default();
+        let pos_start: usize = block_el
+            .get_attribute("data-pos-start")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let pos_end: usize = block_el
+            .get_attribute("data-pos-end")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        // Read the raw content from the placeholder child. If it's missing,
+        // a previous rAF already mounted a live view into this block — skip.
+        let content = match block_el.query_selector(".kode-extension-content") {
+            Ok(Some(el)) => el.text_content().unwrap_or_default(),
+            _ => continue,
+        };
+
+        let ext = extensions.iter().find(|ext| {
+            ext.code_block_languages().contains(&lang.as_str())
+        });
+        let Some(ext) = ext else { continue };
+
+        let owner = Owner::new();
+        let result = owner.with(|| {
+            for ctx_fn in &captured_contexts {
+                ctx_fn();
+            }
+            ext.render_code_block(&lang, &content, pos_start, pos_end)
+                .map(|view| view.build())
+        });
+
+        let Some(mut state) = result else { continue };
+
+        block_el.set_inner_html("");
+        state.mount(&block_el, None);
+
+        // Leak both — dropping Owner disposes reactive nodes while
+        // spawn_local futures from the extension are in-flight, causing
+        // re-entrant wasm-bindgen executor panics. The leak is bounded:
+        // new owners are only created when innerHTML resets with fresh
+        // placeholders (content changes), not on every keystroke — the
+        // skip-when-placeholder-missing guard above prevents re-mounting
+        // into blocks that a previous rAF already handled.
+        std::mem::forget(state);
+        std::mem::forget(owner);
+    }
 }
