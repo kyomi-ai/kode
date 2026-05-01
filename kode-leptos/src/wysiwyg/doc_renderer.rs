@@ -749,8 +749,8 @@ fn block_node_to_html(
                      <div class=\"kode-extension-content\">{content}</div>\
                      </div>",
                     ext = escaped_lang,
-                    start = content_start,
-                    end = content_end,
+                    start = start,
+                    end = start + node.node_size(),
                     content = escaped_content,
                 ));
             } else {
