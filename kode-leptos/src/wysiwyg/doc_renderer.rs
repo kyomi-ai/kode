@@ -681,6 +681,89 @@ pub fn doc_to_html(
     html
 }
 
+// ── Segment-based renderer (for stable extension blocks) ────────────────
+
+/// A render segment represents one top-level block (or grid group) in the
+/// editor. Text blocks carry pre-rendered HTML that can be set via innerHTML.
+/// Extension blocks carry raw content that gets mounted as a live Leptos view.
+///
+/// The WYSIWYG editor uses segments to do block-level DOM patching: only text
+/// blocks whose HTML changed get their innerHTML updated. Extension block DOM
+/// elements persist across renders — they are never destroyed by innerHTML.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenderSegment {
+    /// A text block (paragraph, heading, list, code block, HR, blockquote,
+    /// table) rendered as a complete HTML element string.
+    TextBlock {
+        html: String,
+    },
+    /// An extension block whose DOM element should persist across renders.
+    ExtensionBlock {
+        lang: String,
+        content: String,
+        pos_start: usize,
+        pos_end: usize,
+        col_span: Option<u8>,
+    },
+}
+
+/// Split a document into render segments for block-level DOM patching.
+///
+/// Consecutive extension blocks with `col_span` are emitted as individual
+/// `ExtensionBlock` segments — the caller (DOM patcher) groups them into
+/// grid wrappers. This keeps the segment list flat and easy to diff.
+pub fn doc_to_segments(
+    doc: &Node,
+    extensions: &[Arc<dyn Extension>],
+    language_aliases: &[(String, String)],
+) -> Vec<RenderSegment> {
+    let mut segments = Vec::new();
+    let mut pos: usize = 0;
+
+    for child in doc.content.iter() {
+        let node_start = pos;
+        let node_end = pos + child.node_size();
+
+        if is_extension_block(child, extensions) {
+            let lang = match get_attr(&child.attrs, "language") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let content = child.text_content();
+            let col_span = get_extension_col_span(child, extensions);
+            segments.push(RenderSegment::ExtensionBlock {
+                lang,
+                content,
+                pos_start: node_start,
+                pos_end: node_end,
+                col_span,
+            });
+        } else {
+            let mut html = String::new();
+            block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+            segments.push(RenderSegment::TextBlock { html });
+        }
+
+        pos = node_end;
+    }
+
+    segments
+}
+
+/// Check if a node is a code block handled by an extension.
+fn is_extension_block(node: &Node, extensions: &[Arc<dyn Extension>]) -> bool {
+    if node.node_type != NodeType::CodeBlock {
+        return false;
+    }
+    let lang = match get_attr(&node.attrs, "language") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => return false,
+    };
+    extensions
+        .iter()
+        .any(|ext| ext.code_block_languages().contains(&lang))
+}
+
 /// Check if a node is an extension code block with a column span.
 fn get_extension_col_span(node: &Node, extensions: &[Arc<dyn Extension>]) -> Option<u8> {
     if node.node_type != NodeType::CodeBlock {
@@ -1539,5 +1622,173 @@ mod tests {
         let html = doc_to_html(&doc, &[], &[]);
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
+    }
+
+    // ── doc_to_segments tests ─────────────────────────────────────
+
+    #[test]
+    fn segments_text_only() {
+        let para = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Hello")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(para));
+        let segs = doc_to_segments(&doc, &[], &[]);
+        assert_eq!(segs.len(), 1);
+        assert!(matches!(&segs[0], RenderSegment::TextBlock { html } if html.contains("Hello")));
+    }
+
+    #[test]
+    fn segments_extension_block() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("title: Revenue")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let segs = doc_to_segments(&doc, &[ext], &[]);
+        assert_eq!(segs.len(), 1);
+        match &segs[0] {
+            RenderSegment::ExtensionBlock { lang, content, .. } => {
+                assert_eq!(lang, "chart");
+                assert_eq!(content, "title: Revenue");
+            }
+            _ => panic!("expected ExtensionBlock"),
+        }
+    }
+
+    #[test]
+    fn segments_mixed_text_and_extension() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        let para1 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Before")),
+        );
+        let chart = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("type: bar")),
+        );
+        let para2 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("After")),
+        );
+        let doc = Node::branch(
+            NodeType::Doc,
+            Fragment::from_vec(vec![para1, chart, para2]),
+        );
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let segs = doc_to_segments(&doc, &[ext], &[]);
+        assert_eq!(segs.len(), 3);
+        assert!(matches!(&segs[0], RenderSegment::TextBlock { html } if html.contains("Before")));
+        assert!(matches!(&segs[1], RenderSegment::ExtensionBlock { content, .. } if content == "type: bar"));
+        assert!(matches!(&segs[2], RenderSegment::TextBlock { html } if html.contains("After")));
+    }
+
+    #[test]
+    fn segments_extension_col_span() {
+        struct ColSpanExt;
+        impl Extension for ColSpanExt {
+            fn name(&self) -> &str { "col-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+            fn block_col_span(&self, content: &str) -> Option<u8> {
+                if content.contains("half") { Some(6) } else { None }
+            }
+        }
+
+        let chart1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("half left")),
+        );
+        let chart2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("half right")),
+        );
+        let doc = Node::branch(
+            NodeType::Doc,
+            Fragment::from_vec(vec![chart1, chart2]),
+        );
+        let ext: Arc<dyn Extension> = Arc::new(ColSpanExt);
+        let segs = doc_to_segments(&doc, &[ext], &[]);
+        assert_eq!(segs.len(), 2);
+        match (&segs[0], &segs[1]) {
+            (
+                RenderSegment::ExtensionBlock { col_span: Some(6), content: c1, .. },
+                RenderSegment::ExtensionBlock { col_span: Some(6), content: c2, .. },
+            ) => {
+                assert_eq!(c1, "half left");
+                assert_eq!(c2, "half right");
+            }
+            _ => panic!("expected two ExtensionBlocks with col_span=6"),
+        }
+    }
+
+    #[test]
+    fn segments_non_extension_code_block_is_text() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("sql"),
+            Fragment::from_node(Node::new_text("SELECT 1")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let segs = doc_to_segments(&doc, &[ext], &[]);
+        assert_eq!(segs.len(), 1);
+        assert!(matches!(&segs[0], RenderSegment::TextBlock { html } if html.contains("SELECT")));
+    }
+
+    #[test]
+    fn segments_positions_are_correct() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+
+        // Paragraph "Hi" = node_size 4 (open + 2 chars + close)
+        let para = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Hi")),
+        );
+        // CodeBlock "chart" with content "x" = node_size 3 (open + 1 char + close)
+        let chart = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chart"),
+            Fragment::from_node(Node::new_text("x")),
+        );
+        let doc = Node::branch(
+            NodeType::Doc,
+            Fragment::from_vec(vec![para, chart]),
+        );
+        let ext: Arc<dyn Extension> = Arc::new(TestExt);
+        let segs = doc_to_segments(&doc, &[ext], &[]);
+        assert_eq!(segs.len(), 2);
+        match &segs[1] {
+            RenderSegment::ExtensionBlock { pos_start, pos_end, .. } => {
+                assert_eq!(*pos_start, 4); // after the paragraph
+                assert_eq!(*pos_end, 7);   // 4 + node_size(3)
+            }
+            _ => panic!("expected ExtensionBlock"),
+        }
     }
 }

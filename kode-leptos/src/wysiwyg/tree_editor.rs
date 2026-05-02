@@ -26,7 +26,7 @@ use crate::theme::Theme;
 use crate::toolbar::{InjectCommand, ToolbarItem, default_toolbar_items, dispatch_builtin_action};
 
 use super::clipboard::{html_escape, extract_kode_markdown};
-use super::doc_renderer::doc_to_html;
+use super::doc_renderer::{doc_to_segments, RenderSegment};
 use super::dom_helpers::apply_md_command;
 
 /// Tree-based WYSIWYG editor component using `contenteditable`.
@@ -186,45 +186,54 @@ pub fn TreeWysiwygEditor(
         new_content
     });
 
-    // ── HTML content memo ────────────────────────────────────────────────
+    // ── Segment-based content memo ─────────────────────────────────────────
+    // Produces a Vec<RenderSegment> instead of a flat HTML string so the
+    // Effect can patch the DOM at the block level — text blocks get their
+    // innerHTML updated while extension blocks persist untouched.
     let doc_for_html = doc_state.clone();
     let extensions_for_html = Arc::clone(&extensions);
     let aliases_for_html = Arc::clone(&language_aliases);
     let drag_state_html =
         send_wrapper::SendWrapper::new(drag_state.as_ref().map(std::rc::Rc::clone));
-    let html_cache = send_wrapper::SendWrapper::new(std::cell::RefCell::new(String::new()));
-    let html_content = Memo::new(move |_| {
-        // Track version to maintain reactive dependency even when returning cached HTML.
+    let segments_cache = send_wrapper::SendWrapper::new(
+        std::cell::RefCell::new(Vec::<RenderSegment>::new()),
+    );
+    let segments_memo = Memo::new(move |_| {
         let _v = version.get();
 
-        // Suppress re-renders during an active drag to avoid destroying the DOM mid-drag.
         if let Some(ref ds) = *drag_state_html {
             if ds.active.get() {
-                return html_cache.borrow().clone();
+                return segments_cache.borrow().clone();
             }
         }
 
         let Ok(ds) = doc_for_html.lock() else {
-            return String::new();
+            return Vec::new();
         };
-        // Notify extensions that a new render pass is starting.
         for ext in extensions_for_html.iter() {
             ext.begin_render_pass();
         }
-        let html = doc_to_html(ds.doc(), &extensions_for_html, &aliases_for_html);
-        *html_cache.borrow_mut() = html.clone();
-        html
+        let segs = doc_to_segments(ds.doc(), &extensions_for_html, &aliases_for_html);
+        *segments_cache.borrow_mut() = segs.clone();
+        segs
     });
 
-    // ── Selection restore + extension mounting after re-render ─────────
+    // Previous segments for diffing — stored outside the Memo so the
+    // Effect can compare old vs new on each cycle.
+    let prev_segments: send_wrapper::SendWrapper<std::cell::RefCell<Vec<RenderSegment>>> =
+        send_wrapper::SendWrapper::new(std::cell::RefCell::new(Vec::new()));
+
+    // ── Segment-based DOM patching + selection restore ──────────────────
     let doc_for_sel = doc_state.clone();
     let extensions_for_effect = Arc::clone(&extensions);
+    let prev_segments_for_effect = prev_segments.clone();
+    let ext_ctx_for_effect = extension_context.clone();
+    let can_drag_for_effect = can_drag_block.clone();
     Effect::new(move |_| {
         let _v = version.get();
         let is_composing = composing.get();
 
         // Compute formatting state for toolbar active buttons.
-        // Lock must be released before signal writes to avoid recursive-lock panics.
         let (fmt, ext_states, should_update_ext) = {
             let Ok(ds) = doc_for_sel.lock() else { return };
             let fmt = ds.formatting_at_cursor();
@@ -249,11 +258,35 @@ pub fn TreeWysiwygEditor(
             return;
         }
 
+        // Patch the DOM synchronously using segment diff — extension blocks
+        // persist across renders, only text blocks get innerHTML updates.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let new_segs = segments_memo.get();
+            if let Some(container) = editor_ref.get_untracked() {
+                let container_el: &web_sys::Element = container.as_ref();
+                let mut old = prev_segments_for_effect.borrow_mut();
+                patch_segments(
+                    container_el,
+                    &old,
+                    &new_segs,
+                    &extensions_for_effect,
+                    ext_ctx_for_effect.as_deref(),
+                    enable_block_drag,
+                    can_drag_for_effect.as_deref(),
+                );
+                *old = new_segs;
+            }
+        }
+
+        // Keep the variables alive for the wasm32 cfg block above.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (&segments_memo, &prev_segments_for_effect, &ext_ctx_for_effect, &can_drag_for_effect);
+        }
+
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
-        let exts_raf = Arc::clone(&extensions_for_effect);
-        let ext_ctx = extension_context.clone();
-        let can_drag_block_raf = can_drag_block.as_ref().map(Arc::clone);
 
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
@@ -270,12 +303,6 @@ pub fn TreeWysiwygEditor(
                 restore_cursor(container_el, head);
             } else {
                 restore_range(container_el, anchor, head);
-            }
-
-            mount_extension_views(container_el, &exts_raf, ext_ctx.as_deref());
-
-            if enable_block_drag {
-                mount_drag_handles(container_el, can_drag_block_raf.as_deref());
             }
         });
         let _ = web_sys::window()
@@ -1325,7 +1352,6 @@ pub fn TreeWysiwygEditor(
                 on:keydown=on_keydown
                 on:compositionstart=on_composition_start
                 on:compositionend=on_composition_end
-                inner_html=move || html_content.get()
             />
         </div>
     }
@@ -1699,133 +1725,397 @@ fn compute_extension_active_states(
         .collect()
 }
 
-/// Mount live extension views into the placeholder divs created by `doc_to_html`.
+// ── Segment-based DOM patching ───────────────────────────────────────────
+
+/// Patch the container's DOM children to match `new_segments`.
 ///
-/// The string-based HTML renderer emits `<div class="kode-extension-block"
-/// data-kode-extension="lang" ...>` with the raw content inside a
-/// `<div class="kode-extension-content">` child. This function replaces that
-/// static content with the live Leptos views returned by each extension's
-/// `render_code_block()`.
-fn mount_extension_views(
+/// Text blocks are rendered as wrapper `<div>` elements whose innerHTML
+/// contains the block's HTML. Extension blocks are persistent
+/// `<div contenteditable="false">` elements with Leptos views mounted inside.
+///
+/// On each call, the old and new segment lists are walked in parallel:
+/// - Text blocks: update innerHTML only if the HTML string changed.
+/// - Extension blocks: preserve the DOM element; only re-mount if the
+///   raw content changed.
+/// - Segment count changes: append new elements or remove excess.
+///
+/// Grid grouping: consecutive extension blocks with `col_span` are wrapped
+/// in `<div class="kode-block-grid">` with `<div class="kode-grid-item">`
+/// children. The grid wrapper is treated as a single DOM child of the container.
+#[cfg(target_arch = "wasm32")]
+fn patch_segments(
     container: &web_sys::Element,
+    old_segments: &[RenderSegment],
+    new_segments: &[RenderSegment],
     extensions: &[Arc<dyn crate::extension::Extension>],
     extension_context: Option<&(dyn Fn() + Send + Sync)>,
+    enable_block_drag: bool,
+    can_drag_block: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
 ) {
-    if extensions.is_empty() {
-        return;
-    }
-
-    let Ok(blocks) = container.query_selector_all("div.kode-extension-block[data-kode-extension]")
-    else {
-        return;
+    let doc = match web_sys::window().and_then(|w| w.document()) {
+        Some(d) => d,
+        None => return,
     };
 
-    for i in 0..blocks.length() {
-        let Some(node) = blocks.item(i) else { continue };
-        let block_el: web_sys::Element = node.unchecked_into();
+    // Group new segments into "DOM slots" — each slot is either a single
+    // text block, a single non-grid extension block, or a grid group of
+    // consecutive extension blocks with col_span.
+    let new_slots = group_into_slots(new_segments);
+    let old_slots = group_into_slots(old_segments);
 
-        let lang = block_el
-            .get_attribute("data-kode-extension")
-            .unwrap_or_default();
-        let pos_start: usize = block_el
-            .get_attribute("data-pos-start")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let pos_end: usize = block_el
-            .get_attribute("data-pos-end")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+    let children = container.children();
+    let old_child_count = children.length() as usize;
 
-        // Read the raw content from the placeholder child. If it's missing,
-        // a previous rAF already mounted a live view into this block — skip.
-        let content = match block_el.query_selector(".kode-extension-content") {
-            Ok(Some(el)) => el.text_content().unwrap_or_default(),
-            _ => continue,
+    // Walk slots in parallel, patching the DOM.
+    let max_len = new_slots.len().max(old_slots.len());
+    for i in 0..max_len {
+        let old_slot = old_slots.get(i);
+        let new_slot = new_slots.get(i);
+        let existing_child = if i < old_child_count {
+            children.item(i as u32)
+        } else {
+            None
         };
 
-        let ext = extensions.iter().find(|ext| {
-            ext.code_block_languages().contains(&lang.as_str())
-        });
-        let Some(ext) = ext else { continue };
-
-        let owner = Owner::new();
-        let result = owner.with(|| {
-            if let Some(ctx_fn) = extension_context {
-                ctx_fn();
+        match (old_slot, new_slot) {
+            // Slot removed — handled by the trailing cleanup loop below.
+            (Some(_), None) => {}
+            // New slot added — create and append.
+            (None, Some(new)) => {
+                let el = create_slot_element(&doc, new, extensions, extension_context, enable_block_drag, can_drag_block);
+                let _ = container.append_child(&el);
             }
-            ext.render_code_block(&lang, &content, pos_start, pos_end)
-                .map(|view| view.build())
-        });
+            // Both exist — diff and patch in place.
+            (Some(old), Some(new)) => {
+                if let Some(child) = existing_child {
+                    patch_slot_in_place(
+                        &doc,
+                        &child,
+                        old,
+                        new,
+                        extensions,
+                        extension_context,
+                        enable_block_drag,
+                        can_drag_block,
+                    );
+                } else {
+                    let el = create_slot_element(&doc, new, extensions, extension_context, enable_block_drag, can_drag_block);
+                    let _ = container.append_child(&el);
+                }
+            }
+            (None, None) => break,
+        }
+    }
 
-        let Some(mut state) = result else { continue };
+    // Remove any trailing old children beyond the new slot count.
+    while container.children().length() as usize > new_slots.len() {
+        if let Some(last) = container.last_child() {
+            let _ = container.remove_child(&last);
+        } else {
+            break;
+        }
+    }
+}
 
-        block_el.set_inner_html("");
-        state.mount(&block_el, None);
+/// A DOM slot: one top-level child of the container.
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug)]
+enum DomSlot<'a> {
+    Text { html: &'a str },
+    Extension { lang: &'a str, content: &'a str, pos_start: usize, pos_end: usize },
+    Grid { items: Vec<(&'a str, &'a str, usize, usize, u8)> }, // (lang, content, start, end, span)
+}
 
-        // Leak both — dropping Owner disposes reactive nodes while
-        // spawn_local futures from the extension are in-flight, causing
-        // re-entrant wasm-bindgen executor panics. The leak is bounded:
-        // new owners are only created when innerHTML resets with fresh
-        // placeholders (content changes), not on every keystroke — the
-        // skip-when-placeholder-missing guard above prevents re-mounting
-        // into blocks that a previous rAF already handled.
+/// Group a flat segment list into DOM slots, merging consecutive col_span
+/// extension blocks into grid groups.
+#[cfg(target_arch = "wasm32")]
+fn group_into_slots<'a>(segments: &'a [RenderSegment]) -> Vec<DomSlot<'a>> {
+    let mut slots = Vec::new();
+    let mut i = 0;
+
+    while i < segments.len() {
+        match &segments[i] {
+            RenderSegment::TextBlock { html } => {
+                slots.push(DomSlot::Text { html });
+                i += 1;
+            }
+            RenderSegment::ExtensionBlock { lang, content, pos_start, pos_end, col_span } => {
+                if let Some(span) = col_span {
+                    // Start a grid group — collect consecutive extension blocks with col_span.
+                    let mut items = vec![(lang.as_str(), content.as_str(), *pos_start, *pos_end, *span)];
+                    i += 1;
+                    while i < segments.len() {
+                        if let RenderSegment::ExtensionBlock { lang: l, content: c, pos_start: ps, pos_end: pe, col_span: Some(s) } = &segments[i] {
+                            items.push((l.as_str(), c.as_str(), *ps, *pe, *s));
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    // Solo col_span blocks are also wrapped in a grid for consistent layout.
+                    slots.push(DomSlot::Grid { items });
+                } else {
+                    slots.push(DomSlot::Extension {
+                        lang,
+                        content,
+                        pos_start: *pos_start,
+                        pos_end: *pos_end,
+                    });
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    slots
+}
+
+/// Create a new DOM element for a slot.
+#[cfg(target_arch = "wasm32")]
+fn create_slot_element(
+    doc: &web_sys::Document,
+    slot: &DomSlot<'_>,
+    extensions: &[Arc<dyn crate::extension::Extension>],
+    extension_context: Option<&(dyn Fn() + Send + Sync)>,
+    enable_block_drag: bool,
+    can_drag_block: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
+) -> web_sys::Element {
+    match slot {
+        DomSlot::Text { html } => {
+            let wrapper = doc.create_element("div").unwrap();
+            let _ = wrapper.set_attribute("class", "kode-text-segment");
+            wrapper.set_inner_html(html);
+            wrapper
+        }
+        DomSlot::Extension { lang, content, pos_start, pos_end } => {
+            let block = create_extension_element(doc, lang, content, *pos_start, *pos_end, extensions, extension_context);
+            if enable_block_drag {
+                mount_drag_handle_on_element(&block, *pos_start, *pos_end, can_drag_block);
+            }
+            block
+        }
+        DomSlot::Grid { items } => {
+            let grid = doc.create_element("div").unwrap();
+            let _ = grid.set_attribute("class", "kode-block-grid");
+            for &(lang, content, ps, pe, span) in items {
+                let grid_item = doc.create_element("div").unwrap();
+                let _ = grid_item.set_attribute("class", "kode-grid-item");
+                let _ = grid_item.set_attribute("data-col-span", &span.to_string());
+                let block = create_extension_element(doc, lang, content, ps, pe, extensions, extension_context);
+                if enable_block_drag {
+                    mount_drag_handle_on_element(&block, ps, pe, can_drag_block);
+                }
+                let _ = grid_item.append_child(&block);
+                let _ = grid.append_child(&grid_item);
+            }
+            grid
+        }
+    }
+}
+
+/// Mount a Leptos extension view into an element.
+///
+/// Creates a new reactive `Owner`, calls `render_code_block`, mounts the
+/// resulting view, and intentionally leaks both the `Owner` and the view
+/// state. The leak prevents reactive disposal panics from in-flight
+/// `spawn_local` futures inside the extension. It is bounded: new owners
+/// are only created when extension content actually changes, not on every
+/// keystroke.
+#[cfg(target_arch = "wasm32")]
+fn mount_extension_view(
+    block: &web_sys::Element,
+    ext: &dyn crate::extension::Extension,
+    lang: &str,
+    content: &str,
+    pos_start: usize,
+    pos_end: usize,
+    extension_context: Option<&(dyn Fn() + Send + Sync)>,
+) {
+    let owner = Owner::new();
+    let result = owner.with(|| {
+        if let Some(ctx_fn) = extension_context {
+            ctx_fn();
+        }
+        ext.render_code_block(lang, content, pos_start, pos_end)
+            .map(|view| view.build())
+    });
+    if let Some(mut state) = result {
+        state.mount(block, None);
         std::mem::forget(state);
         std::mem::forget(owner);
     }
 }
 
-/// Mount drag handles on extension blocks for drag-and-drop reordering.
-///
-/// Queries all atomic extension blocks inside `container` and prepends a
-/// `.kode-drag-handle` element to each one. The handle carries
-/// `data-block-start` / `data-block-end` attributes so pointer-event
-/// handlers can identify the source block without walking the DOM.
-fn mount_drag_handles(
-    container: &web_sys::Element,
-    can_drag: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
+/// Create a persistent extension block element with a mounted Leptos view.
+#[cfg(target_arch = "wasm32")]
+fn create_extension_element(
+    doc: &web_sys::Document,
+    lang: &str,
+    content: &str,
+    pos_start: usize,
+    pos_end: usize,
+    extensions: &[Arc<dyn crate::extension::Extension>],
+    extension_context: Option<&(dyn Fn() + Send + Sync)>,
+) -> web_sys::Element {
+    let block = doc.create_element("div").unwrap();
+    let _ = block.set_attribute("contenteditable", "false");
+    let _ = block.set_attribute("class", "kode-extension-block");
+    let _ = block.set_attribute("data-kode-extension", lang);
+    let _ = block.set_attribute("data-pos-start", &pos_start.to_string());
+    let _ = block.set_attribute("data-pos-end", &pos_end.to_string());
+    let _ = block.set_attribute("data-kode-content", content);
+
+    if let Some(ext) = extensions.iter().find(|e| e.code_block_languages().contains(&lang)) {
+        mount_extension_view(&block, ext.as_ref(), lang, content, pos_start, pos_end, extension_context);
+    }
+
+    block
+}
+
+/// Patch a DOM slot in place, preserving extension blocks when content matches.
+#[cfg(target_arch = "wasm32")]
+fn patch_slot_in_place(
+    doc: &web_sys::Document,
+    child: &web_sys::Element,
+    old: &DomSlot<'_>,
+    new: &DomSlot<'_>,
+    extensions: &[Arc<dyn crate::extension::Extension>],
+    extension_context: Option<&(dyn Fn() + Send + Sync)>,
+    enable_block_drag: bool,
+    can_drag_block: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
 ) {
-    let Ok(blocks) = container.query_selector_all("div.kode-extension-block[data-kode-extension]")
-    else { return };
-
-    for i in 0..blocks.length() {
-        let Some(node) = blocks.item(i) else { continue };
-        let block_el: web_sys::Element = node.unchecked_into();
-
-        // Skip if handle already mounted.
-        if block_el.query_selector(".kode-drag-handle").ok().flatten().is_some() {
-            continue;
-        }
-
-        let pos_start: usize = block_el.get_attribute("data-pos-start")
-            .and_then(|s| s.parse().ok()).unwrap_or(0);
-        let pos_end: usize = block_el.get_attribute("data-pos-end")
-            .and_then(|s| s.parse().ok()).unwrap_or(0);
-
-        // Check if this block should be draggable.
-        if let Some(filter) = can_drag {
-            if !filter(pos_start, pos_end) {
-                continue;
+    match (old, new) {
+        // Text → Text: update innerHTML if changed.
+        (DomSlot::Text { html: old_html }, DomSlot::Text { html: new_html }) => {
+            if old_html != new_html {
+                child.set_inner_html(new_html);
             }
         }
+        // Extension → Extension: preserve DOM if content matches.
+        (
+            DomSlot::Extension { content: old_content, .. },
+            DomSlot::Extension { lang, content: new_content, pos_start, pos_end },
+        ) => {
+            let _ = child.set_attribute("data-pos-start", &pos_start.to_string());
+            let _ = child.set_attribute("data-pos-end", &pos_end.to_string());
+            if let Ok(Some(handle)) = child.query_selector(".kode-drag-handle") {
+                let _ = handle.set_attribute("data-block-start", &pos_start.to_string());
+                let _ = handle.set_attribute("data-block-end", &pos_end.to_string());
+            }
+            if old_content != new_content {
+                child.set_inner_html("");
+                let _ = child.set_attribute("data-kode-content", new_content);
+                if let Some(ext) = extensions.iter().find(|e| e.code_block_languages().contains(lang)) {
+                    mount_extension_view(child, ext.as_ref(), lang, new_content, *pos_start, *pos_end, extension_context);
+                }
+                if enable_block_drag {
+                    mount_drag_handle_on_element(child, *pos_start, *pos_end, can_drag_block);
+                }
+            }
+        }
+        // Grid → Grid: patch items in place.
+        (DomSlot::Grid { items: old_items }, DomSlot::Grid { items: new_items }) => {
+            let grid_children = child.children();
+            let max_items = old_items.len().max(new_items.len());
 
-        // Make the block positioned for the absolute handle.
-        let block_html: &HtmlElement = block_el.unchecked_ref();
-        let _ = block_html.style().set_property("position", "relative");
+            for j in 0..max_items {
+                let old_item = old_items.get(j);
+                let new_item = new_items.get(j);
+                let grid_item_el = grid_children.item(j as u32);
 
-        // Create the drag handle element.
-        let doc = web_sys::window().and_then(|w| w.document());
-        let Some(doc) = doc else { continue };
-        let Ok(handle) = doc.create_element("div") else { continue };
-        let _ = handle.set_attribute("class", "kode-drag-handle");
-        let _ = handle.set_attribute("contenteditable", "false");
-        let _ = handle.set_attribute("data-block-start", &pos_start.to_string());
-        let _ = handle.set_attribute("data-block-end", &pos_end.to_string());
-        handle.set_inner_html("\u{283F}"); // braille pattern dots-123456 (grip icon)
+                match (old_item, new_item) {
+                    // Handled by the trailing cleanup loop below.
+                    (Some(_), None) => {}
+                    (None, Some(&(lang, content, ps, pe, span))) => {
+                        let grid_item = doc.create_element("div").unwrap();
+                        let _ = grid_item.set_attribute("class", "kode-grid-item");
+                        let _ = grid_item.set_attribute("data-col-span", &span.to_string());
+                        let block = create_extension_element(doc, lang, content, ps, pe, extensions, extension_context);
+                        if enable_block_drag {
+                            mount_drag_handle_on_element(&block, ps, pe, can_drag_block);
+                        }
+                        let _ = grid_item.append_child(&block);
+                        let _ = child.append_child(&grid_item);
+                    }
+                    (Some(&(_, old_content, _, _, old_span)), Some(&(lang, new_content, ps, pe, new_span))) => {
+                        if let Some(grid_item) = grid_item_el {
+                            if old_span != new_span {
+                                let _ = grid_item.set_attribute("data-col-span", &new_span.to_string());
+                            }
+                            // Find the extension block inside the grid item.
+                            if let Ok(Some(block)) = grid_item.query_selector(".kode-extension-block") {
+                                let _ = block.set_attribute("data-pos-start", &ps.to_string());
+                                let _ = block.set_attribute("data-pos-end", &pe.to_string());
+                                if let Ok(Some(handle)) = block.query_selector(".kode-drag-handle") {
+                                    let _ = handle.set_attribute("data-block-start", &ps.to_string());
+                                    let _ = handle.set_attribute("data-block-end", &pe.to_string());
+                                }
+                                if old_content != new_content {
+                                    block.set_inner_html("");
+                                    let _ = block.set_attribute("data-kode-content", new_content);
+                                    if let Some(ext) = extensions.iter().find(|e| e.code_block_languages().contains(&lang)) {
+                                        mount_extension_view(&block, ext.as_ref(), lang, new_content, ps, pe, extension_context);
+                                    }
+                                    if enable_block_drag {
+                                        mount_drag_handle_on_element(&block, ps, pe, can_drag_block);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    (None, None) => break,
+                }
+            }
 
-        // Prepend the handle to the block.
-        let _ = block_el.prepend_with_node_1(&handle);
+            // Remove trailing grid items.
+            while child.children().length() as usize > new_items.len() {
+                if let Some(last) = child.last_child() {
+                    let _ = child.remove_child(&last);
+                } else {
+                    break;
+                }
+            }
+        }
+        // Type changed — replace the element entirely.
+        _ => {
+            let new_el = create_slot_element(doc, new, extensions, extension_context, enable_block_drag, can_drag_block);
+            if let Some(parent) = child.parent_node() {
+                let _ = parent.replace_child(&new_el, child);
+            }
+        }
     }
 }
+
+/// Mount a drag handle on a single extension block element.
+#[cfg(target_arch = "wasm32")]
+fn mount_drag_handle_on_element(
+    block: &web_sys::Element,
+    pos_start: usize,
+    pos_end: usize,
+    can_drag: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
+) {
+    if block.query_selector(".kode-drag-handle").ok().flatten().is_some() {
+        return;
+    }
+    if let Some(filter) = can_drag {
+        if !filter(pos_start, pos_end) {
+            return;
+        }
+    }
+    let block_html: &HtmlElement = block.unchecked_ref();
+    let _ = block_html.style().set_property("position", "relative");
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(handle) = doc.create_element("div") else { return };
+    let _ = handle.set_attribute("class", "kode-drag-handle");
+    let _ = handle.set_attribute("contenteditable", "false");
+    let _ = handle.set_attribute("data-block-start", &pos_start.to_string());
+    let _ = handle.set_attribute("data-block-end", &pos_end.to_string());
+    handle.set_inner_html("\u{283F}");
+    let _ = block.prepend_with_node_1(&handle);
+}
+
+// mount_extension_views and mount_drag_handles removed —
+// replaced by patch_segments() which handles both inline.
 
 /// Walk up from `el` to find the direct child of `container`.
 /// Returns `None` if `el` is not a descendant of `container`.
