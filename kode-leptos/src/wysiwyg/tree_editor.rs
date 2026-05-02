@@ -547,7 +547,8 @@ pub fn TreeWysiwygEditor(
                 let _ = body.class_list().add_1("kode-dragging");
             }
 
-            // Add visual feedback to the source block.
+            // Highlight just the dragged block (not the whole grid group).
+            // In grid layouts this shows which specific chart is being moved.
             if let Some(block) = target_el.parent_element() {
                 let _ = block.class_list().add_1("kode-block-dragging");
             }
@@ -583,8 +584,10 @@ pub fn TreeWysiwygEditor(
                 let Some(node) = blocks.item(i) else { continue };
                 let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
 
-                // Only consider direct children of the container (top-level blocks).
-                if el.parent_element().as_ref() != Some(container_el) { continue; }
+                // Find the top-level ancestor of this block (direct child of container).
+                // Blocks may be nested inside grid wrappers (.kode-block-grid > .kode-grid-item).
+                let top_level = find_top_level_ancestor(&el, container_el);
+                let Some(top_el) = top_level else { continue };
 
                 let rect = el.get_bounding_client_rect();
                 let raw_start: usize = el.get_attribute("data-pos-start")
@@ -600,21 +603,29 @@ pub fn TreeWysiwygEditor(
                 let block_start = if is_extension { raw_start } else { raw_start.saturating_sub(1) };
                 let block_end = if is_extension { raw_end } else { raw_end + 1 };
 
-                // Check distance to top edge of this block.
+                // When the block is inside a grid wrapper, the indicator is placed
+                // at the grid boundary, so target_pos must match: use the first
+                // block's start or last block's end within the grid group.
+                let (group_start, group_end) = if top_el != el {
+                    resolve_grid_group_positions(&top_el)
+                        .unwrap_or((block_start, block_end))
+                } else {
+                    (block_start, block_end)
+                };
+
                 let top_dist = (client_y - rect.top()).abs();
                 if top_dist < best_dist {
                     best_dist = top_dist;
-                    best_target_pos = block_start;
-                    best_insert_el = Some(el.clone());
+                    best_target_pos = group_start;
+                    best_insert_el = Some(top_el.clone());
                     best_insert_before = true;
                 }
 
-                // Check distance to bottom edge of this block.
                 let bottom_dist = (client_y - rect.bottom()).abs();
                 if bottom_dist < best_dist {
                     best_dist = bottom_dist;
-                    best_target_pos = block_end;
-                    best_insert_el = Some(el.clone());
+                    best_target_pos = group_end;
+                    best_insert_el = Some(top_el);
                     best_insert_before = false;
                 }
             }
@@ -1730,4 +1741,46 @@ fn mount_drag_handles(
         // Prepend the handle to the block.
         let _ = block_el.prepend_with_node_1(&handle);
     }
+}
+
+/// Walk up from `el` to find the direct child of `container`.
+/// Returns `None` if `el` is not a descendant of `container`.
+/// Bounded to ~4 hops (block → grid-item → block-grid → container).
+fn find_top_level_ancestor(
+    el: &web_sys::Element,
+    container: &web_sys::Element,
+) -> Option<web_sys::Element> {
+    let mut current = el.clone();
+    loop {
+        match current.parent_element() {
+            Some(parent) if &parent == container => return Some(current),
+            Some(parent) => current = parent,
+            None => return None,
+        }
+    }
+}
+
+/// For a grid group wrapper, find the block-level start of its first child
+/// and block-level end of its last child. Used to align drop target positions
+/// with the grid boundary when the indicator is placed at group edges.
+fn resolve_grid_group_positions(grid_wrapper: &web_sys::Element) -> Option<(usize, usize)> {
+    let Ok(blocks) = grid_wrapper.query_selector_all("[data-pos-start]") else {
+        return None;
+    };
+    if blocks.length() == 0 {
+        return None;
+    }
+    let first: web_sys::Element = blocks.item(0)?.unchecked_into();
+    let last: web_sys::Element = blocks.item(blocks.length() - 1)?.unchecked_into();
+
+    let first_raw: usize = first.get_attribute("data-pos-start")?.parse().ok()?;
+    let last_raw: usize = last.get_attribute("data-pos-end")?.parse().ok()?;
+
+    let first_is_ext = first.has_attribute("data-kode-extension");
+    let last_is_ext = last.has_attribute("data-kode-extension");
+
+    let group_start = if first_is_ext { first_raw } else { first_raw.saturating_sub(1) };
+    let group_end = if last_is_ext { last_raw } else { last_raw + 1 };
+
+    Some((group_start, group_end))
 }
