@@ -643,13 +643,58 @@ pub fn doc_to_html(
 ) -> String {
     let mut html = String::new();
     let mut pos = 0; // content_start = 0
+    let mut grid_open = false;
 
     for child in doc.content.iter() {
-        block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+        let col_span = get_extension_col_span(child, extensions);
+
+        if let Some(span) = col_span {
+            // This block wants grid layout.
+            if !grid_open {
+                html.push_str("<div class=\"kode-block-grid\">");
+                grid_open = true;
+            }
+            // Wrap the extension block in a grid item with col-span.
+            html.push_str(&format!(
+                "<div class=\"kode-grid-item\" data-col-span=\"{}\">",
+                span.clamp(1, 12)
+            ));
+            block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+            html.push_str("</div>");
+        } else {
+            // Close any open grid group.
+            if grid_open {
+                html.push_str("</div>");
+                grid_open = false;
+            }
+            block_node_to_html(&mut html, child, pos, extensions, language_aliases);
+        }
+
         pos += child.node_size();
     }
 
+    // Close trailing grid group.
+    if grid_open {
+        html.push_str("</div>");
+    }
+
     html
+}
+
+/// Check if a node is an extension code block with a column span.
+fn get_extension_col_span(node: &Node, extensions: &[Arc<dyn Extension>]) -> Option<u8> {
+    if node.node_type != NodeType::CodeBlock {
+        return None;
+    }
+    let lang = match get_attr(&node.attrs, "language") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => return None,
+    };
+    let ext = extensions
+        .iter()
+        .find(|ext| ext.code_block_languages().contains(&lang))?;
+    let content = node.text_content();
+    ext.block_col_span(&content)
 }
 
 /// Render a single block-level node to an HTML string.

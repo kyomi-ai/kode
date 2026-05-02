@@ -94,6 +94,19 @@ pub trait Extension: Send + Sync {
         None
     }
 
+    /// Column span for this block in a grid layout (1–12).
+    ///
+    /// When an extension returns `Some(n)` for a block, consecutive extension
+    /// blocks with column spans are grouped into a 12-column grid container.
+    /// Blocks that return `None` break the grid group and render full-width.
+    ///
+    /// The `content` parameter is the raw content inside the fenced code block,
+    /// allowing the extension to parse layout hints from the block's content
+    /// (e.g., a `layout.colSpan` field in YAML).
+    fn block_col_span(&self, _content: &str) -> Option<u8> {
+        None
+    }
+
     // ── Toolbar ──────────────────────────────────────────────────
 
     /// Additional toolbar buttons this extension provides.

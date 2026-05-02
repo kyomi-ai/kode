@@ -6,6 +6,38 @@ All notable changes to this project are documented here. Format based on
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-05-02
+
+### Added
+
+#### `kode-doc`
+
+- `DocState::move_block(block_start, block_end, target_pos)` — position-based
+  block reordering with full undo/redo support.
+
+#### `kode-leptos`
+
+- **Block drag-and-drop reordering**: new `enable_block_drag` and
+  `can_drag_block` props on `TreeWysiwygEditor`. When enabled, atomic
+  extension blocks show a grip handle on hover that can be grabbed to
+  reorder blocks visually. Uses custom pointer events (not HTML5 DnD)
+  with FLIP animation for smooth transitions. Includes `pointercancel`
+  handling for touch/stylus interrupts and auto-scroll near container edges.
+
+- **Native grid layout for extension blocks**: new
+  `Extension::block_col_span(&self, content: &str) -> Option<u8>` trait
+  method. Extensions can return a 1–12 column span per block. Consecutive
+  extension blocks with column spans are automatically grouped into a
+  12-column CSS grid container (`.kode-block-grid`). This replaces the
+  need for consuming apps to use `display: contents` CSS hacks for
+  side-by-side chart layouts.
+
+- CSS custom properties for full style customization:
+  `--kode-drag-handle-*`, `--kode-drop-indicator-*`,
+  `--kode-block-grid-*`, `--kode-block-dragging-opacity`.
+
+- `enable_block_drag` prop threaded through `MarkdownEditorComponent`.
+
 ## [0.2.2] — 2026-04-30
 
 ### Fixed

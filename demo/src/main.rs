@@ -25,6 +25,8 @@ impl Extension for ChartDemoExtension {
         _block_start: usize,
         _block_end: usize,
     ) -> Option<AnyView> {
+        let col_span = self.block_col_span(content);
+        let span_label = col_span.map(|n| format!(" \u{00b7} span {n}/12"));
         let content = content.to_string();
         Some(
             view! {
@@ -33,12 +35,25 @@ impl Extension for ChartDemoExtension {
                     style="padding:16px;border:2px solid #f59e0b;border-radius:8px;background:#1a1625;color:#e2e8f0;font-family:system-ui,sans-serif;user-select:none;">
                     <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#f59e0b;margin-bottom:8px;">
                         "Chart Block (atomic)"
+                        {span_label}
                     </div>
                     <div style="font-size:14px;white-space:pre-wrap;">{content}</div>
                 </div>
             }
             .into_any(),
         )
+    }
+
+    fn block_col_span(&self, content: &str) -> Option<u8> {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix("colSpan:") {
+                if let Ok(n) = val.trim().parse::<u8>() {
+                    return Some(n.clamp(1, 12));
+                }
+            }
+        }
+        None
     }
 }
 
@@ -119,7 +134,7 @@ fn App() -> impl IntoView {
     };
 
     // ── Markdown editor state ────────────────────────────────────
-    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n```chart\ntitle: Regional Breakdown\ntype: pie\n```\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
+    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\ncolSpan: 6\n```\n\n```chart\ntitle: Regional Breakdown\ntype: pie\ncolSpan: 6\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```chart\ntitle: User Growth\ntype: line\n```\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n```chart\ntitle: Conversion Funnel\ntype: funnel\n```\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
 
     let (md_content, set_md_content) = signal(markdown_sample.to_string());
 
@@ -272,6 +287,7 @@ fn App() -> impl IntoView {
                                     initial_mode=EditorMode::Wysiwyg
                                     theme=theme
                                     extensions=vec![Arc::new(ChartDemoExtension) as Arc<dyn Extension>]
+                                    enable_block_drag=true
                                 />
                             </div>
                         </div>

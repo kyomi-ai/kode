@@ -621,4 +621,43 @@ impl DocState {
         self.redo_stack.clear();
         true
     }
+
+    /// Move a block from `[block_start, block_end)` to `target_pos`.
+    ///
+    /// This is the engine behind drag-and-drop block reordering. The block
+    /// identified by `block_start..block_end` is extracted, removed from its
+    /// current position, and re-inserted at `target_pos` (which is adjusted
+    /// through the deletion's step map so it stays correct after the removal).
+    ///
+    /// No-op if `target_pos` is within `block_start..=block_end`.
+    ///
+    /// Panics if `block_start > block_end`.
+    pub fn move_block(&mut self, block_start: usize, block_end: usize, target_pos: usize) {
+        assert!(block_start <= block_end, "block_start ({block_start}) > block_end ({block_end})");
+
+        // No-op: moving to the same position (including block_end, which
+        // maps back to block_start after deletion — producing an identical doc).
+        if target_pos >= block_start && target_pos <= block_end {
+            return;
+        }
+
+        self.push_undo();
+
+        // Extract the block content before mutating.
+        let extracted = self.doc.slice(block_start, block_end).content;
+
+        // Delete the block, then insert at the mapped target position.
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(block_start, block_end).is_ok() {
+            let adjusted_target = tr.map_pos(target_pos, 1);
+            if tr.insert(adjusted_target, extracted).is_ok() {
+                self.doc = tr.doc;
+                self.selection = Selection::cursor(
+                    self.adjust_into_textblock(adjusted_target + 1),
+                );
+            }
+        }
+
+        self.redo_stack.clear();
+    }
 }
