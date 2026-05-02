@@ -119,7 +119,7 @@ fn App() -> impl IntoView {
     };
 
     // ── Markdown editor state ────────────────────────────────────
-    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n```chart\ntitle: Regional Breakdown\ntype: pie\n```\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
+    let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n```chart\ntitle: Regional Breakdown\ntype: pie\n```\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```chart\ntitle: User Growth\ntype: line\n```\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n```chart\ntitle: Conversion Funnel\ntype: funnel\n```\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
 
     let (md_content, set_md_content) = signal(markdown_sample.to_string());
 
@@ -272,6 +272,7 @@ fn App() -> impl IntoView {
                                     initial_mode=EditorMode::Wysiwyg
                                     theme=theme
                                     extensions=vec![Arc::new(ChartDemoExtension) as Arc<dyn Extension>]
+                                    enable_block_drag=true
                                 />
                             </div>
                         </div>

@@ -28,6 +28,10 @@ pub fn MarkdownEditorComponent(
     /// and keyboard shortcuts. Passed through to the WYSIWYG editor.
     #[prop(default = vec![])]
     extensions: Vec<Arc<dyn Extension>>,
+    /// Enable drag-and-drop reordering of blocks. Passed through to the
+    /// WYSIWYG editor.
+    #[prop(default = false)]
+    enable_block_drag: bool,
 ) -> impl IntoView {
     let mode = RwSignal::new(initial_mode);
 
@@ -90,6 +94,7 @@ pub fn MarkdownEditorComponent(
                                     show_toolbar=true
                                     theme=theme
                                     extensions=exts
+                                    enable_block_drag=enable_block_drag
                                 />
                             }.into_any()
                         }
