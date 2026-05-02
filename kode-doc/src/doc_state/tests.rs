@@ -2424,3 +2424,223 @@ mod atom_tests {
         assert!(state.doc.child(0).is_atom(), "pre-existing chartml block must stay atomic after paste");
     }
 }
+
+mod move_block_tests {
+    use crate::attrs::code_block_attrs;
+    use crate::doc_state::*;
+    use crate::fragment::Fragment;
+    use crate::node::Node;
+    use crate::node_type::NodeType;
+
+    /// Build: <doc><p>Hello</p><p>World</p></doc>
+    ///
+    /// Positions:
+    ///   p1: 0..7  (open=0, H=1..5, o=6, close=7 — wait, 5 chars)
+    ///   Actually: <p>=0, H=1, e=2, l=3, l=4, o=5, </p>=6
+    ///   p1 node_size = 1 + 5 + 1 = 7, so p1 occupies 0..7
+    ///   p2: 7..14 (<p>=7, W=8, o=9, r=10, l=11, d=12, </p>=13)
+    ///   p2 node_size = 1 + 5 + 1 = 7, so p2 occupies 7..14
+    fn two_para_doc() -> Node {
+        let p1 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Hello")),
+        );
+        let p2 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("World")),
+        );
+        Node::branch(NodeType::Doc, Fragment::from_vec(vec![p1, p2]))
+    }
+
+    /// Build: <doc><p>Alpha</p><p>Bravo</p><p>Charlie</p></doc>
+    fn three_para_doc() -> Node {
+        let p1 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Alpha")),
+        );
+        let p2 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Bravo")),
+        );
+        let p3 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Charlie")),
+        );
+        Node::branch(NodeType::Doc, Fragment::from_vec(vec![p1, p2, p3]))
+    }
+
+    #[test]
+    fn move_block_forward() {
+        // Move first paragraph past the second.
+        // Before: <doc><p>Hello</p><p>World</p></doc>
+        // p1: 0..7, p2: 7..14
+        // Move p1 (0..7) to target_pos=14 (end of doc).
+        // After: <doc><p>World</p><p>Hello</p></doc>
+        let mut state = DocState::from_doc(two_para_doc());
+        state.move_block(0, 7, 14);
+
+        assert_eq!(state.doc.child_count(), 2);
+        assert_eq!(state.doc.child(0).text_content(), "World");
+        assert_eq!(state.doc.child(1).text_content(), "Hello");
+    }
+
+    #[test]
+    fn move_block_backward() {
+        // Move second paragraph before the first.
+        // Before: <doc><p>Hello</p><p>World</p></doc>
+        // p1: 0..7, p2: 7..14
+        // Move p2 (7..14) to target_pos=0 (start of doc).
+        // After: <doc><p>World</p><p>Hello</p></doc>
+        let mut state = DocState::from_doc(two_para_doc());
+        state.move_block(7, 14, 0);
+
+        assert_eq!(state.doc.child_count(), 2);
+        assert_eq!(state.doc.child(0).text_content(), "World");
+        assert_eq!(state.doc.child(1).text_content(), "Hello");
+    }
+
+    #[test]
+    fn move_block_noop_target_within_range() {
+        // Target inside the block range should be a no-op.
+        let mut state = DocState::from_doc(two_para_doc());
+        let doc_before = state.doc.clone();
+        let sel_before = state.selection.clone();
+
+        state.move_block(0, 7, 3);
+
+        assert_eq!(state.doc, doc_before);
+        assert_eq!(state.selection, sel_before);
+        assert!(state.undo_stack.is_empty(), "no-op should not push undo");
+    }
+
+    #[test]
+    fn move_block_noop_target_at_block_start() {
+        // target_pos == block_start is within [block_start, block_end].
+        let mut state = DocState::from_doc(two_para_doc());
+        let doc_before = state.doc.clone();
+
+        state.move_block(0, 7, 0);
+
+        assert_eq!(state.doc, doc_before);
+        assert!(state.undo_stack.is_empty(), "no-op should not push undo");
+    }
+
+    #[test]
+    fn move_block_noop_target_at_block_end() {
+        // target_pos == block_end maps back to block_start after deletion,
+        // producing an identical document — must be treated as no-op.
+        let mut state = DocState::from_doc(two_para_doc());
+        let doc_before = state.doc.clone();
+
+        state.move_block(0, 7, 7);
+
+        assert_eq!(state.doc, doc_before);
+        assert!(state.undo_stack.is_empty(), "no-op should not push undo");
+    }
+
+    #[test]
+    fn move_atomic_block() {
+        // Move an atomic code block forward past a paragraph.
+        // <doc><codeblock[chartml]>chart</codeblock><p>Hello</p></doc>
+        //   cb: 0..7 (1+5+1), p: 7..14 (1+5+1)
+        let mut cb = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("chart")),
+        );
+        cb.atom = true;
+        let p = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Hello")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb, p]));
+        let mut state = DocState::from_doc(doc);
+
+        // Move the atomic block (0..7) to after the paragraph (target=14).
+        state.move_block(0, 7, 14);
+
+        assert_eq!(state.doc.child_count(), 2);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hello");
+        assert_eq!(state.doc.child(1).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc.child(1).text_content(), "chart");
+        assert!(state.doc.child(1).is_atom(), "atom flag must be preserved after move");
+    }
+
+    #[test]
+    fn move_block_undo_reverses() {
+        // Verify that undo restores the original document.
+        let original_doc = two_para_doc();
+        let mut state = DocState::from_doc(original_doc.clone());
+        let sel_before = state.selection.clone();
+
+        state.move_block(0, 7, 14);
+
+        // Verify the move happened.
+        assert_eq!(state.doc.child(0).text_content(), "World");
+        assert_eq!(state.doc.child(1).text_content(), "Hello");
+
+        // Undo.
+        assert!(state.undo());
+
+        assert_eq!(state.doc, original_doc);
+        assert_eq!(state.selection, sel_before);
+    }
+
+    #[test]
+    fn move_block_markdown_correct_after_move() {
+        // Verify markdown serialization is correct after moving.
+        let mut state = DocState::from_doc(three_para_doc());
+
+        // Move first paragraph (0..7) to end of doc.
+        // p1: 0..7 "Alpha", p2: 7..14 "Bravo", p3: 14..23 "Charlie"
+        let doc_size = state.doc.content.size();
+        state.move_block(0, 7, doc_size);
+
+        let md = state.to_markdown();
+        // After move: Bravo, Charlie, Alpha
+        assert!(
+            md.starts_with("Bravo"),
+            "expected markdown to start with 'Bravo', got: {md:?}"
+        );
+        assert!(
+            md.contains("Charlie"),
+            "expected 'Charlie' in markdown, got: {md:?}"
+        );
+        assert!(
+            md.ends_with("Alpha"),
+            "expected markdown to end with 'Alpha', got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn move_block_forward_middle_to_end() {
+        // Move middle paragraph to end in a three-paragraph doc.
+        // Before: Alpha, Bravo, Charlie
+        // Move Bravo (7..14) to end (23).
+        // After: Alpha, Charlie, Bravo
+        let mut state = DocState::from_doc(three_para_doc());
+        let doc_size = state.doc.content.size();
+        state.move_block(7, 14, doc_size);
+
+        assert_eq!(state.doc.child_count(), 3);
+        assert_eq!(state.doc.child(0).text_content(), "Alpha");
+        assert_eq!(state.doc.child(1).text_content(), "Charlie");
+        assert_eq!(state.doc.child(2).text_content(), "Bravo");
+    }
+
+    #[test]
+    fn move_block_clears_redo_stack() {
+        // Verify that redo stack is cleared after a move.
+        let mut state = DocState::from_doc(two_para_doc());
+
+        // Do an edit, then undo to populate redo stack.
+        state.insert_text("x");
+        state.undo();
+        assert!(!state.redo_stack.is_empty(), "redo stack should have an entry");
+
+        // Now move a block — redo should be cleared.
+        state.move_block(0, 7, 14);
+        assert!(state.redo_stack.is_empty(), "redo stack should be cleared after move_block");
+    }
+}
