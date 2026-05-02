@@ -587,10 +587,18 @@ pub fn TreeWysiwygEditor(
                 if el.parent_element().as_ref() != Some(container_el) { continue; }
 
                 let rect = el.get_bounding_client_rect();
-                let block_start: usize = el.get_attribute("data-pos-start")
+                let raw_start: usize = el.get_attribute("data-pos-start")
                     .and_then(|s| s.parse().ok()).unwrap_or(0);
-                let block_end: usize = el.get_attribute("data-pos-end")
+                let raw_end: usize = el.get_attribute("data-pos-end")
                     .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+                // Extension blocks store block-level positions; all other
+                // blocks store content positions (1 token inside the block).
+                // Adjust non-extension blocks to block boundaries so the
+                // insert lands between blocks, not inside one.
+                let is_extension = el.has_attribute("data-kode-extension");
+                let block_start = if is_extension { raw_start } else { raw_start.saturating_sub(1) };
+                let block_end = if is_extension { raw_end } else { raw_end + 1 };
 
                 // Check distance to top edge of this block.
                 let top_dist = (client_y - rect.top()).abs();
