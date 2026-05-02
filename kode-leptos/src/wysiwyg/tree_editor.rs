@@ -709,12 +709,95 @@ pub fn TreeWysiwygEditor(
                 return;
             }
 
+            // FLIP animation: snapshot extension block positions before move.
+            let old_rects: Vec<(String, web_sys::DomRect)> = {
+                let mut rects = Vec::new();
+                if let Ok(all_blocks) = container_el.query_selector_all("div.kode-extension-block[data-kode-extension]") {
+                    for i in 0..all_blocks.length() {
+                        if let Some(node) = all_blocks.item(i) {
+                            let el: web_sys::Element = node.unchecked_into();
+                            let text = el.text_content().unwrap_or_default();
+                            // Use first 50 chars of text content as a fingerprint
+                            // to match blocks across renders.
+                            let key: String = text.chars().take(50).collect();
+                            rects.push((key, el.get_bounding_client_rect()));
+                        }
+                    }
+                }
+                rects
+            };
+
             // Commit the move.
             let Ok(mut ds) = doc_up.lock() else { return };
             ds.move_block(source_start, source_end, target);
             let md = ds.to_markdown();
             drop(ds);
             (notify_up)(Some(md));
+
+            // Schedule FLIP animation after the DOM rebuilds.
+            let old_rects_js = send_wrapper::SendWrapper::new(old_rects);
+            let editor_flip = editor_up;
+            let flip_cb = Closure::once(move || {
+                let Some(container) = editor_flip.get() else { return };
+                let container_el: &web_sys::Element = container.as_ref();
+
+                let Ok(new_blocks) = container_el.query_selector_all("div.kode-extension-block[data-kode-extension]") else { return };
+
+                for i in 0..new_blocks.length() {
+                    let Some(node) = new_blocks.item(i) else { continue };
+                    let el: web_sys::Element = node.unchecked_into();
+                    let text = el.text_content().unwrap_or_default();
+                    let key: String = text.chars().take(50).collect();
+                    let new_rect = el.get_bounding_client_rect();
+
+                    // Find the matching old rect by content fingerprint.
+                    if let Some((_, old_rect)) = old_rects_js.iter().find(|(k, _)| k == &key) {
+                        let dx = old_rect.left() - new_rect.left();
+                        let dy = old_rect.top() - new_rect.top();
+
+                        // Skip if the block didn't move.
+                        if dx.abs() < 1.0 && dy.abs() < 1.0 { continue; }
+
+                        let html_el: &web_sys::HtmlElement = el.unchecked_ref();
+                        let style = html_el.style();
+
+                        // Invert: suppress transition first, then snap to old position.
+                        let _ = style.set_property("transition", "none");
+                        let _ = style.set_property("transform", &format!("translate({dx}px, {dy}px)"));
+
+                        // Play: animate to new position on next frame.
+                        let el_clone = el.clone();
+                        let play_cb = Closure::once(move || {
+                            let html_el: &web_sys::HtmlElement = el_clone.unchecked_ref();
+                            let style = html_el.style();
+                            let _ = style.set_property("transition", "transform 200ms ease-out");
+                            let _ = style.set_property("transform", "");
+
+                            // Clean up after animation completes.
+                            let el_cleanup = el_clone.clone();
+                            let cleanup = Closure::once(move || {
+                                let html_el: &web_sys::HtmlElement = el_cleanup.unchecked_ref();
+                                let _ = html_el.style().remove_property("transition");
+                                let _ = html_el.style().remove_property("transform");
+                            });
+                            let _ = web_sys::window().and_then(|w| {
+                                w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                    cleanup.as_ref().unchecked_ref(), 250
+                                ).ok()
+                            });
+                            cleanup.forget(); // one-shot timeout
+                        });
+                        let _ = web_sys::window().and_then(|w| {
+                            w.request_animation_frame(play_cb.as_ref().unchecked_ref()).ok()
+                        });
+                        play_cb.forget(); // one-shot rAF
+                    }
+                }
+            });
+            let _ = web_sys::window().and_then(|w| {
+                w.request_animation_frame(flip_cb.as_ref().unchecked_ref()).ok()
+            });
+            flip_cb.forget(); // one-shot rAF
         });
 
         // pointercancel: clean up drag state without committing (touch/stylus cancel, OS gesture).
