@@ -553,3 +553,69 @@ div.wysiwyg-code-block code {
     background: var(--kode-bg-highlight);
     color: var(--kode-fg-dim);
 }
+
+/* ── Drag-and-drop ────────────────────────────────────────────────── */
+
+.kode-drag-handle {
+    position: absolute;
+    left: var(--kode-drag-handle-left, -32px);
+    top: var(--kode-drag-handle-top, 50%);
+    transform: translateY(-50%);
+    width: var(--kode-drag-handle-size, 20px);
+    height: var(--kode-drag-handle-size, 20px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--kode-drag-handle-font-size, 14px);
+    color: var(--kode-drag-handle-color, var(--kode-fg-dim));
+    cursor: grab;
+    opacity: 0;
+    transition: opacity var(--kode-transition-duration, 0.15s) ease;
+    border-radius: var(--kode-drag-handle-border-radius, 4px);
+    user-select: none;
+    touch-action: none;
+    z-index: 1;
+}
+
+.kode-extension-block:hover > .kode-drag-handle,
+.kode-drag-handle:hover {
+    opacity: 1;
+}
+
+.kode-drag-handle:hover {
+    background: var(--kode-drag-handle-hover-bg, var(--kode-bg-hover));
+    color: var(--kode-drag-handle-hover-color, var(--kode-fg-bright));
+}
+
+.kode-drag-handle:active {
+    cursor: grabbing;
+}
+
+.kode-drop-indicator {
+    height: var(--kode-drop-indicator-height, 3px);
+    background: var(--kode-drop-indicator-color, var(--kode-accent));
+    border-radius: var(--kode-drop-indicator-border-radius, 2px);
+    margin: var(--kode-drop-indicator-margin, 4px 0);
+    pointer-events: none;
+    animation: kode-drop-pulse 1s ease-in-out infinite;
+}
+
+@keyframes kode-drop-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.kode-block-dragging {
+    opacity: var(--kode-block-dragging-opacity, 0.5);
+    outline: 2px dashed var(--kode-drop-indicator-color, var(--kode-accent));
+    outline-offset: 2px;
+}
+
+body.kode-dragging {
+    user-select: none !important;
+    cursor: grabbing !important;
+}
+
+body.kode-dragging * {
+    cursor: grabbing !important;
+}

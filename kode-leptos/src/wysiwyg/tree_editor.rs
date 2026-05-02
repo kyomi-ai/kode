@@ -68,6 +68,16 @@ pub fn TreeWysiwygEditor(
     /// cache backends, etc.) available to the rendered components.
     #[prop(optional)]
     extension_context: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Enable drag-and-drop reordering of blocks. When true, draggable
+    /// blocks show a grip handle on hover that can be grabbed to reorder.
+    #[prop(default = false)]
+    enable_block_drag: bool,
+    /// Filter which blocks are draggable. Receives the block's
+    /// `(data-pos-start, data-pos-end)` token positions. When `None` and
+    /// `enable_block_drag` is true, all atomic extension blocks are
+    /// draggable by default.
+    #[prop(optional)]
+    can_drag_block: Option<Arc<dyn Fn(usize, usize) -> bool + Send + Sync>>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
     let atomic_langs: HashSet<String> = extensions
@@ -88,6 +98,25 @@ pub fn TreeWysiwygEditor(
     let last_ext_version = std::cell::Cell::new(0u64);
 
     let editor_ref = NodeRef::<leptos::html::Div>::new();
+
+    // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
+    struct DragState {
+        active: std::cell::Cell<bool>,
+        source_start: std::cell::Cell<usize>,
+        source_end: std::cell::Cell<usize>,
+        target_pos: std::cell::Cell<usize>,
+    }
+
+    let drag_state = if enable_block_drag {
+        Some(std::rc::Rc::new(DragState {
+            active: std::cell::Cell::new(false),
+            source_start: std::cell::Cell::new(0),
+            source_end: std::cell::Cell::new(0),
+            target_pos: std::cell::Cell::new(0),
+        }))
+    } else {
+        None
+    };
 
     // ── Extension data ───────────────────────────────────────────────────
     let extension_shortcuts: Arc<Vec<ExtensionKeyboardShortcut>> = Arc::new(
@@ -161,8 +190,20 @@ pub fn TreeWysiwygEditor(
     let doc_for_html = doc_state.clone();
     let extensions_for_html = Arc::clone(&extensions);
     let aliases_for_html = Arc::clone(&language_aliases);
+    let drag_state_html =
+        send_wrapper::SendWrapper::new(drag_state.as_ref().map(std::rc::Rc::clone));
+    let html_cache = send_wrapper::SendWrapper::new(std::cell::RefCell::new(String::new()));
     let html_content = Memo::new(move |_| {
+        // Track version to maintain reactive dependency even when returning cached HTML.
         let _v = version.get();
+
+        // Suppress re-renders during an active drag to avoid destroying the DOM mid-drag.
+        if let Some(ref ds) = *drag_state_html {
+            if ds.active.get() {
+                return html_cache.borrow().clone();
+            }
+        }
+
         let Ok(ds) = doc_for_html.lock() else {
             return String::new();
         };
@@ -170,7 +211,9 @@ pub fn TreeWysiwygEditor(
         for ext in extensions_for_html.iter() {
             ext.begin_render_pass();
         }
-        doc_to_html(ds.doc(), &extensions_for_html, &aliases_for_html)
+        let html = doc_to_html(ds.doc(), &extensions_for_html, &aliases_for_html);
+        *html_cache.borrow_mut() = html.clone();
+        html
     });
 
     // ── Selection restore + extension mounting after re-render ─────────
@@ -210,6 +253,7 @@ pub fn TreeWysiwygEditor(
         let editor_raf = editor_ref;
         let exts_raf = Arc::clone(&extensions_for_effect);
         let ext_ctx = extension_context.clone();
+        let can_drag_block_raf = can_drag_block.as_ref().map(Arc::clone);
 
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
@@ -229,6 +273,10 @@ pub fn TreeWysiwygEditor(
             }
 
             mount_extension_views(container_el, &exts_raf, ext_ctx.as_deref());
+
+            if enable_block_drag {
+                mount_drag_handles(container_el, can_drag_block_raf.as_deref());
+            }
         });
         let _ = web_sys::window()
             .and_then(|w| w.request_animation_frame(cb.as_ref().unchecked_ref()).ok());
@@ -458,6 +506,262 @@ pub fn TreeWysiwygEditor(
                 drop(cp_wrap);
                 drop(ct_wrap);
                 drop(pa_wrap);
+            });
+        });
+    }
+
+    // ── Drag-and-drop pointer event handlers ────────────────────────────
+    if let Some(ref drag) = drag_state {
+        let drag_down = std::rc::Rc::clone(drag);
+        let pointerdown_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            let ev: web_sys::PointerEvent = ev.unchecked_into();
+
+            // Only handle if the target is a drag handle.
+            let Some(target) = ev.target() else { return };
+            let Ok(target_el) = target.dyn_into::<web_sys::Element>() else { return };
+            if !target_el.class_list().contains("kode-drag-handle") {
+                return;
+            }
+
+            // Read block positions from the handle's data attributes.
+            let start: usize = target_el.get_attribute("data-block-start")
+                .and_then(|s| s.parse().ok()).unwrap_or(0);
+            let end: usize = target_el.get_attribute("data-block-end")
+                .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+            if start == 0 && end == 0 { return; }
+
+            drag_down.active.set(true);
+            drag_down.source_start.set(start);
+            drag_down.source_end.set(end);
+            drag_down.target_pos.set(start);
+
+            // Capture pointer on the handle element.
+            let _ = target_el.set_pointer_capture(ev.pointer_id());
+
+            ev.prevent_default();
+            ev.stop_propagation();
+
+            // Add dragging class to body for user-select:none.
+            if let Some(body) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.body()) {
+                let _ = body.class_list().add_1("kode-dragging");
+            }
+
+            // Add visual feedback to the source block.
+            if let Some(block) = target_el.parent_element() {
+                let _ = block.class_list().add_1("kode-block-dragging");
+            }
+        });
+
+        let drag_move = std::rc::Rc::clone(drag);
+        let editor_move = editor_ref;
+        let pointermove_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            if !drag_move.active.get() { return; }
+
+            let ev: web_sys::PointerEvent = ev.unchecked_into();
+            let client_y = ev.client_y() as f64;
+
+            let Some(container) = editor_move.get() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+
+            // Find all top-level blocks and determine which gap the pointer is in.
+            let Ok(blocks) = container_el.query_selector_all("[data-pos-start]") else { return };
+
+            // Remove any existing drop indicator.
+            if let Ok(Some(old)) = container_el.query_selector(".kode-drop-indicator") {
+                old.remove();
+            }
+
+            let mut best_target_pos = 0usize;
+            let mut best_insert_el: Option<web_sys::Element> = None;
+            let mut best_insert_before = true;
+            let mut best_dist = f64::MAX;
+            let source_start = drag_move.source_start.get();
+            let source_end = drag_move.source_end.get();
+
+            for i in 0..blocks.length() {
+                let Some(node) = blocks.item(i) else { continue };
+                let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
+
+                // Only consider direct children of the container (top-level blocks).
+                if el.parent_element().as_ref() != Some(container_el) { continue; }
+
+                let rect = el.get_bounding_client_rect();
+                let block_start: usize = el.get_attribute("data-pos-start")
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                let block_end: usize = el.get_attribute("data-pos-end")
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+                // Check distance to top edge of this block.
+                let top_dist = (client_y - rect.top()).abs();
+                if top_dist < best_dist {
+                    best_dist = top_dist;
+                    best_target_pos = block_start;
+                    best_insert_el = Some(el.clone());
+                    best_insert_before = true;
+                }
+
+                // Check distance to bottom edge of this block.
+                let bottom_dist = (client_y - rect.bottom()).abs();
+                if bottom_dist < best_dist {
+                    best_dist = bottom_dist;
+                    best_target_pos = block_end;
+                    best_insert_el = Some(el.clone());
+                    best_insert_before = false;
+                }
+            }
+
+            // Don't show indicator if target is within the source block.
+            if best_target_pos >= source_start && best_target_pos <= source_end {
+                drag_move.target_pos.set(source_start);
+                return;
+            }
+
+            drag_move.target_pos.set(best_target_pos);
+
+            // Create and insert the drop indicator.
+            if let Some(ref insert_el) = best_insert_el {
+                let doc = web_sys::window().and_then(|w| w.document());
+                if let Some(doc) = doc {
+                    if let Ok(indicator) = doc.create_element("div") {
+                        let _ = indicator.set_attribute("class", "kode-drop-indicator");
+                        let _ = indicator.set_attribute("contenteditable", "false");
+                        if best_insert_before {
+                            let _ = container_el.insert_before(&indicator, Some(insert_el));
+                        } else if let Some(next) = insert_el.next_element_sibling() {
+                            let _ = container_el.insert_before(&indicator, Some(&next));
+                        } else {
+                            let _ = container_el.append_child(&indicator);
+                        }
+                    }
+                }
+            }
+
+            // Auto-scroll near edges.
+            let container_rect = container_el.get_bounding_client_rect();
+            let scroll_zone = 40.0;
+            let scroll_speed = 8.0;
+            if client_y - container_rect.top() < scroll_zone {
+                container_el.set_scroll_top(container_el.scroll_top() - scroll_speed as i32);
+            } else if container_rect.bottom() - client_y < scroll_zone {
+                container_el.set_scroll_top(container_el.scroll_top() + scroll_speed as i32);
+            }
+        });
+
+        let drag_up = std::rc::Rc::clone(drag);
+        let doc_up = doc_state.clone();
+        let notify_up = notify.clone();
+        let editor_up = editor_ref;
+        let pointerup_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            let _ev: web_sys::PointerEvent = ev.unchecked_into();
+            if !drag_up.active.get() { return; }
+
+            drag_up.active.set(false);
+
+            // Remove dragging classes.
+            if let Some(body) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.body()) {
+                let _ = body.class_list().remove_1("kode-dragging");
+            }
+
+            let Some(container) = editor_up.get() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+
+            // Remove drop indicator.
+            if let Ok(Some(indicator)) = container_el.query_selector(".kode-drop-indicator") {
+                indicator.remove();
+            }
+
+            // Remove block-dragging class from all blocks.
+            if let Ok(dragging_blocks) = container_el.query_selector_all(".kode-block-dragging") {
+                for i in 0..dragging_blocks.length() {
+                    if let Some(node) = dragging_blocks.item(i) {
+                        let el: web_sys::Element = node.unchecked_into();
+                        let _ = el.class_list().remove_1("kode-block-dragging");
+                    }
+                }
+            }
+
+            let source_start = drag_up.source_start.get();
+            let source_end = drag_up.source_end.get();
+            let target = drag_up.target_pos.get();
+
+            // Don't move if target is same as source.
+            if target >= source_start && target <= source_end {
+                return;
+            }
+
+            // Commit the move.
+            let Ok(mut ds) = doc_up.lock() else { return };
+            ds.move_block(source_start, source_end, target);
+            let md = ds.to_markdown();
+            drop(ds);
+            (notify_up)(Some(md));
+        });
+
+        // pointercancel: clean up drag state without committing (touch/stylus cancel, OS gesture).
+        let drag_cancel = std::rc::Rc::clone(drag);
+        let editor_cancel = editor_ref;
+        let pointercancel_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
+            if !drag_cancel.active.get() { return; }
+
+            drag_cancel.active.set(false);
+
+            if let Some(body) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.body()) {
+                let _ = body.class_list().remove_1("kode-dragging");
+            }
+
+            let Some(container) = editor_cancel.get() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+
+            if let Ok(Some(indicator)) = container_el.query_selector(".kode-drop-indicator") {
+                indicator.remove();
+            }
+
+            if let Ok(dragging_blocks) = container_el.query_selector_all(".kode-block-dragging") {
+                for i in 0..dragging_blocks.length() {
+                    if let Some(node) = dragging_blocks.item(i) {
+                        let el: web_sys::Element = node.unchecked_into();
+                        let _ = el.class_list().remove_1("kode-block-dragging");
+                    }
+                }
+            }
+        });
+
+        // Attach pointer event listeners using the same pattern as beforeinput/copy/cut/paste.
+        let drag_closures = std::cell::RefCell::new(Some((pointerdown_cb, pointermove_cb, pointerup_cb, pointercancel_cb)));
+        let editor_attach = editor_ref;
+
+        Effect::new(move |_| {
+            let Some(el) = editor_attach.get() else { return };
+            let Some((pd, pm, pu, pc)) = drag_closures.borrow_mut().take() else {
+                return; // Already attached.
+            };
+
+            let target: &web_sys::EventTarget = el.as_ref();
+            let _ = target.add_event_listener_with_callback("pointerdown", pd.as_ref().unchecked_ref());
+            let _ = target.add_event_listener_with_callback("pointermove", pm.as_ref().unchecked_ref());
+            let _ = target.add_event_listener_with_callback("pointerup", pu.as_ref().unchecked_ref());
+            let _ = target.add_event_listener_with_callback("pointercancel", pc.as_ref().unchecked_ref());
+
+            let pd_fn: js_sys::Function = pd.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let pm_fn: js_sys::Function = pm.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let pu_fn: js_sys::Function = pu.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let pc_fn: js_sys::Function = pc.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let pd_wrap = send_wrapper::SendWrapper::new(pd);
+            let pm_wrap = send_wrapper::SendWrapper::new(pm);
+            let pu_wrap = send_wrapper::SendWrapper::new(pu);
+            let pc_wrap = send_wrapper::SendWrapper::new(pc);
+
+            let cleanup_el: web_sys::EventTarget = target.clone();
+            on_cleanup(move || {
+                let _ = cleanup_el.remove_event_listener_with_callback("pointerdown", &pd_fn);
+                let _ = cleanup_el.remove_event_listener_with_callback("pointermove", &pm_fn);
+                let _ = cleanup_el.remove_event_listener_with_callback("pointerup", &pu_fn);
+                let _ = cleanup_el.remove_event_listener_with_callback("pointercancel", &pc_fn);
+                drop(pd_wrap);
+                drop(pm_wrap);
+                drop(pu_wrap);
+                drop(pc_wrap);
             });
         });
     }
@@ -1364,5 +1668,58 @@ fn mount_extension_views(
         // into blocks that a previous rAF already handled.
         std::mem::forget(state);
         std::mem::forget(owner);
+    }
+}
+
+/// Mount drag handles on extension blocks for drag-and-drop reordering.
+///
+/// Queries all atomic extension blocks inside `container` and prepends a
+/// `.kode-drag-handle` element to each one. The handle carries
+/// `data-block-start` / `data-block-end` attributes so pointer-event
+/// handlers can identify the source block without walking the DOM.
+fn mount_drag_handles(
+    container: &web_sys::Element,
+    can_drag: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
+) {
+    let Ok(blocks) = container.query_selector_all("div.kode-extension-block[data-kode-extension]")
+    else { return };
+
+    for i in 0..blocks.length() {
+        let Some(node) = blocks.item(i) else { continue };
+        let block_el: web_sys::Element = node.unchecked_into();
+
+        // Skip if handle already mounted.
+        if block_el.query_selector(".kode-drag-handle").ok().flatten().is_some() {
+            continue;
+        }
+
+        let pos_start: usize = block_el.get_attribute("data-pos-start")
+            .and_then(|s| s.parse().ok()).unwrap_or(0);
+        let pos_end: usize = block_el.get_attribute("data-pos-end")
+            .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // Check if this block should be draggable.
+        if let Some(filter) = can_drag {
+            if !filter(pos_start, pos_end) {
+                continue;
+            }
+        }
+
+        // Make the block positioned for the absolute handle.
+        let block_html: &HtmlElement = block_el.unchecked_ref();
+        let _ = block_html.style().set_property("position", "relative");
+
+        // Create the drag handle element.
+        let doc = web_sys::window().and_then(|w| w.document());
+        let Some(doc) = doc else { continue };
+        let Ok(handle) = doc.create_element("div") else { continue };
+        let _ = handle.set_attribute("class", "kode-drag-handle");
+        let _ = handle.set_attribute("contenteditable", "false");
+        let _ = handle.set_attribute("data-block-start", &pos_start.to_string());
+        let _ = handle.set_attribute("data-block-end", &pos_end.to_string());
+        handle.set_inner_html("\u{283F}"); // braille pattern dots-123456 (grip icon)
+
+        // Prepend the handle to the block.
+        let _ = block_el.prepend_with_node_1(&handle);
     }
 }
