@@ -595,13 +595,14 @@ pub fn TreeWysiwygEditor(
                 let raw_end: usize = el.get_attribute("data-pos-end")
                     .and_then(|s| s.parse().ok()).unwrap_or(0);
 
-                // Extension blocks store block-level positions; all other
-                // blocks store content positions (1 token inside the block).
-                // Adjust non-extension blocks to block boundaries so the
-                // insert lands between blocks, not inside one.
-                let is_extension = el.has_attribute("data-kode-extension");
-                let block_start = if is_extension { raw_start } else { raw_start.saturating_sub(1) };
-                let block_end = if is_extension { raw_end } else { raw_end + 1 };
+                // Extension blocks and leaf nodes (HR) store block-level
+                // positions; branch blocks (paragraphs, headings, etc.) store
+                // content positions (1 token inside). Adjust content-positioned
+                // blocks to block boundaries so the insert lands between blocks.
+                let uses_block_positions = el.has_attribute("data-kode-extension")
+                    || el.tag_name().eq_ignore_ascii_case("hr");
+                let block_start = if uses_block_positions { raw_start } else { raw_start.saturating_sub(1) };
+                let block_end = if uses_block_positions { raw_end } else { raw_end + 1 };
 
                 // When the block is inside a grid wrapper, the indicator is placed
                 // at the grid boundary, so target_pos must match: use the first
@@ -1859,11 +1860,13 @@ fn resolve_grid_group_positions(grid_wrapper: &web_sys::Element) -> Option<(usiz
     let first_raw: usize = first.get_attribute("data-pos-start")?.parse().ok()?;
     let last_raw: usize = last.get_attribute("data-pos-end")?.parse().ok()?;
 
-    let first_is_ext = first.has_attribute("data-kode-extension");
-    let last_is_ext = last.has_attribute("data-kode-extension");
+    let first_block_level = first.has_attribute("data-kode-extension")
+        || first.tag_name().eq_ignore_ascii_case("hr");
+    let last_block_level = last.has_attribute("data-kode-extension")
+        || last.tag_name().eq_ignore_ascii_case("hr");
 
-    let group_start = if first_is_ext { first_raw } else { first_raw.saturating_sub(1) };
-    let group_end = if last_is_ext { last_raw } else { last_raw + 1 };
+    let group_start = if first_block_level { first_raw } else { first_raw.saturating_sub(1) };
+    let group_end = if last_block_level { last_raw } else { last_raw + 1 };
 
     Some((group_start, group_end))
 }
