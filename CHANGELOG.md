@@ -6,6 +6,26 @@ All notable changes to this project are documented here. Format based on
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-05-02
+
+### Fixed
+
+#### `kode-leptos`
+
+- **Extension blocks no longer re-render on every keystroke.** Replaced the
+  single `inner_html` binding that destroyed the entire editor DOM on every
+  keystroke with block-level DOM patching. Extension block DOM elements (charts,
+  visualizations) now persist across renders — they only get position attribute
+  updates, never destroyed and recreated. Charts no longer flash or replay
+  entry animations during typing.
+
+### Added
+
+#### `kode-leptos`
+
+- `doc_to_segments()` — splits a document into `RenderSegment`s (TextBlock or
+  ExtensionBlock) for targeted DOM patching.
+
 ## [0.2.4] — 2026-05-02
 
 ### Added
