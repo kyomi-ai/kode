@@ -304,6 +304,23 @@ pre.wysiwyg-code-block code {
     white-space: pre;
 }
 
+/* ── Gap cursor (caret between blocks next to atomic elements) ────── */
+
+.kode-gap-cursor {
+    display: none;
+    position: absolute;
+    height: 2px;
+    pointer-events: none;
+    z-index: 10;
+    background: var(--kode-gap-cursor-color, var(--kode-accent, #3b82f6));
+    animation: kode-gap-cursor-blink 1.06s steps(1) infinite;
+}
+
+@keyframes kode-gap-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
 /* ── Extension blocks ─────────────────────────────────────────────── */
 
 .kode-extension-block {

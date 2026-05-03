@@ -78,6 +78,17 @@ fn mark_atoms(node: &mut Node, atomic_languages: &HashSet<String>) {
     }
 }
 
+// ── Gap cursor ────────────────────────────────────────────────────────────
+
+/// Which side of an atomic block a gap cursor is on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GapSide {
+    /// Cursor is before (above/left of) the atomic block.
+    Before,
+    /// Cursor is after (below/right of) the atomic block.
+    After,
+}
+
 // ── Selection ──────────────────────────────────────────────────────────────
 
 /// Cursor/selection in the document.
@@ -243,6 +254,14 @@ impl DocState {
         let anchor = self.adjust_into_textblock(selection.anchor);
         let head = self.adjust_into_textblock(selection.head);
         self.selection = Selection { anchor, head };
+    }
+
+    /// Set the selection without adjusting positions into textblocks.
+    ///
+    /// Used internally by cursor movement methods that deliberately place
+    /// the cursor at gap positions next to atomic blocks.
+    pub(super) fn set_selection_raw(&mut self, selection: Selection) {
+        self.selection = selection;
     }
 
     /// Serialize the document to markdown.

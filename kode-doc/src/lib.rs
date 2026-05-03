@@ -26,7 +26,7 @@ pub mod step;
 pub mod transform;
 
 pub use attrs::{AttrValue, Attrs};
-pub use doc_state::{DocState, FormattingState, Selection};
+pub use doc_state::{DocState, FormattingState, GapSide, Selection};
 pub use fragment::Fragment;
 pub use mark::{Mark, MarkType};
 pub use node::Node;

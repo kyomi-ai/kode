@@ -2644,3 +2644,361 @@ mod move_block_tests {
         assert!(state.redo_stack.is_empty(), "redo stack should be cleared after move_block");
     }
 }
+
+mod cursor_movement_tests {
+    use std::collections::HashSet;
+
+    use crate::attrs::code_block_attrs;
+    use crate::doc_state::*;
+    use crate::fragment::Fragment;
+    use crate::node::Node;
+    use crate::node_type::NodeType;
+
+    fn atomic_set(langs: &[&str]) -> HashSet<String> {
+        langs.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Helper: <doc><codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock></doc>
+    fn two_atomic_blocks_doc() -> (Node, HashSet<String>) {
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("chart1")),
+        );
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("graph")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, cb2]));
+        (doc, atomic_set(&["chartml", "mermaid"]))
+    }
+
+    /// Helper: <doc><p>abc</p><codeblock[chartml]>chart</codeblock><p>def</p></doc>
+    ///
+    /// Positions:
+    ///   0: before p1
+    ///   1..4: inside p1 ("abc")
+    ///   5: between p1 and codeblock (gap)
+    ///   6..11: inside codeblock content ("chart") — opaque
+    ///  12: between codeblock and p2 (gap)
+    ///  13..16: inside p2 ("def")
+    ///  17: after p2
+    fn para_atom_para_doc() -> (Node, HashSet<String>) {
+        let p1 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("abc")),
+        );
+        let cb = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("chart")),
+        );
+        let p2 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("def")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![p1, cb, p2]));
+        (doc, atomic_set(&["chartml"]))
+    }
+
+    #[test]
+    fn move_right_within_text() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(1)); // start of "abc"
+        state.move_right();
+        assert_eq!(state.selection().head, 2); // after 'a'
+        state.move_right();
+        assert_eq!(state.selection().head, 3); // after 'b'
+        state.move_right();
+        assert_eq!(state.selection().head, 4); // after 'c'
+    }
+
+    #[test]
+    fn move_right_from_end_of_text_to_gap_cursor() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(4)); // end of "abc"
+        state.move_right();
+        // Should land at gap position before the atomic block.
+        assert_eq!(state.selection().head, 5);
+        assert!(state.is_gap_cursor(5), "pos 5 should be a valid gap cursor");
+    }
+
+#[test]
+    fn move_right_from_gap_skips_atomic_block() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        // Navigate to the gap before the atomic block naturally.
+        state.set_selection(Selection::cursor(4)); // end of "abc"
+        state.move_right(); // -> gap at 5
+        assert_eq!(state.selection().head, 5);
+        // Now skip the atomic block.
+        state.move_right();
+        assert_eq!(state.selection().head, 12);
+    }
+
+    #[test]
+    fn move_right_from_gap_after_atom_enters_textblock() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        // Navigate to gap after the atomic block.
+        state.set_selection(Selection::cursor(4)); // end of "abc"
+        state.move_right(); // -> gap at 5 (before atom)
+        state.move_right(); // -> gap at 12 (after atom)
+        assert_eq!(state.selection().head, 12);
+        // Now move right — should enter next textblock.
+        state.move_right();
+        assert_eq!(state.selection().head, 13); // start of "def"
+    }
+
+    #[test]
+    fn move_left_within_text() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(16)); // end of "def"
+        state.move_left();
+        assert_eq!(state.selection().head, 15);
+        state.move_left();
+        assert_eq!(state.selection().head, 14);
+        state.move_left();
+        assert_eq!(state.selection().head, 13);
+    }
+
+    #[test]
+    fn move_left_from_start_of_text_to_gap_cursor() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(13)); // start of "def"
+        state.move_left();
+        assert_eq!(state.selection().head, 12);
+        assert!(state.is_gap_cursor(12));
+    }
+
+    #[test]
+    fn move_left_from_gap_skips_atomic_block() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(13)); // start of "def"
+        state.move_left(); // -> gap at 12 (after atom)
+        assert_eq!(state.selection().head, 12);
+        state.move_left(); // -> gap at 5 (before atom)
+        assert_eq!(state.selection().head, 5);
+        assert!(state.is_gap_cursor(5));
+    }
+
+    #[test]
+    fn move_left_from_gap_before_atom_enters_textblock() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(13)); // start of "def"
+        state.move_left(); // -> gap at 12
+        state.move_left(); // -> gap at 5
+        state.move_left(); // -> end of "abc" = 4
+        assert_eq!(state.selection().head, 4);
+    }
+
+    #[test]
+    fn move_right_full_traversal_through_atomic_block() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(1));
+
+        // Move through "abc"
+        state.move_right(); // 2
+        state.move_right(); // 3
+        state.move_right(); // 4 (end of "abc")
+
+        // Hit gap cursor left of block
+        state.move_right(); // 5 (gap before atom)
+        assert_eq!(state.selection().head, 5);
+
+        // Skip entire block
+        state.move_right(); // 12 (gap after atom)
+        assert_eq!(state.selection().head, 12);
+
+        // Enter next paragraph
+        state.move_right(); // 13 (start of "def")
+        assert_eq!(state.selection().head, 13);
+
+        // Continue through "def"
+        state.move_right(); // 14
+        state.move_right(); // 15
+        state.move_right(); // 16
+        assert_eq!(state.selection().head, 16);
+    }
+
+    #[test]
+    fn move_left_full_traversal_through_atomic_block() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        // "def" is at positions 13-16. set_selection(16) adjusts into textblock
+        // which keeps it at 16 (inside p2).
+        state.set_selection(Selection::cursor(16));
+        assert_eq!(state.selection().head, 16);
+
+        state.move_left(); // 15
+        state.move_left(); // 14
+        state.move_left(); // 13 (start of "def")
+
+        state.move_left(); // 12 (gap after atom)
+        assert_eq!(state.selection().head, 12);
+
+        state.move_left(); // 5 (gap before atom — skips block)
+        assert_eq!(state.selection().head, 5);
+
+        state.move_left(); // 4 (end of "abc")
+        assert_eq!(state.selection().head, 4);
+
+        state.move_left(); // 3
+        state.move_left(); // 2
+        state.move_left(); // 1
+        assert_eq!(state.selection().head, 1);
+    }
+
+    #[test]
+    fn move_right_between_two_adjacent_atoms() {
+        // Doc: <codeblock[chartml]>chart1</codeblock><codeblock[mermaid]>graph</codeblock>
+        //   cb1: node_size = 1+6+1=8, positions 0..8
+        //   cb2: node_size = 1+5+1=7, positions 8..15
+        //   doc size = 15
+        //
+        // But from_doc_with_atoms adds an empty paragraph if no children...
+        // No, ensure_min_content only adds if child_count==0 — our doc has 2 children.
+        //
+        // Initial cursor from_doc_with_atoms is at position 1 (inside the first
+        // textblock). But cb1 is atomic, so adjust_into_textblock at pos 1 would
+        // resolve inside cb1 (a textblock-like CodeBlock marked as atom).
+        // Actually CodeBlock IS_textblock... Let me check.
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        let doc_size = state.doc().content.size();
+
+        // The initial cursor is at 1, which is inside cb1 content.
+        // But cb1 is atomic, so we need to navigate from a known position.
+        // pos 0 is gap before cb1. set_selection(cursor(0)) adjusts: node_before
+        // is None, node_after is cb1 (atom) → gap cursor stays at 0 because
+        // neither neighbor is a non-atomic textblock. Actually wait — set_selection
+        // calls adjust_into_textblock... at pos 0, parent is Doc, node_before is
+        // None, node_after is cb1 (atom, not non-atomic textblock). So
+        // before_is_textblock=false, after_is_textblock=false → returns 0.
+        state.set_selection(Selection::cursor(0));
+        assert_eq!(state.selection().head, 0);
+        assert!(state.is_gap_cursor(0));
+
+        state.move_right(); // skip cb1 -> gap at 8
+        assert_eq!(state.selection().head, 8);
+        assert!(state.is_gap_cursor(8));
+
+        state.move_right(); // skip cb2 -> gap at 15
+        assert_eq!(state.selection().head, doc_size);
+    }
+
+    #[test]
+    fn move_left_between_two_adjacent_atoms() {
+        let (doc, atoms) = two_atomic_blocks_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        let doc_size = state.doc().content.size();
+
+        // Navigate to end of doc. set_selection at doc_size: parent is Doc,
+        // node_before is cb2 (atom), no node_after → gap cursor. Both neighbors
+        // are atom/None so adjust_into_textblock returns as-is.
+        state.set_selection(Selection::cursor(doc_size));
+        assert_eq!(state.selection().head, doc_size);
+
+        state.move_left(); // skip cb2 -> gap at 8
+        assert_eq!(state.selection().head, 8);
+
+        state.move_left(); // skip cb1 -> gap at 0
+        assert_eq!(state.selection().head, 0);
+    }
+
+    #[test]
+    fn move_right_at_document_end_is_noop() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        let doc_size = state.doc().content.size();
+        state.set_selection(Selection::cursor(doc_size));
+        state.move_right();
+        assert_eq!(state.selection().head, doc_size);
+    }
+
+    #[test]
+    fn move_left_at_document_start_is_noop() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        state.set_selection(Selection::cursor(0));
+        state.move_left();
+        assert_eq!(state.selection().head, 0);
+    }
+
+    #[test]
+    fn is_gap_cursor_inside_textblock_is_false() {
+        let (doc, atoms) = para_atom_para_doc();
+        let state = DocState::from_doc_with_atoms(doc, atoms);
+        assert!(!state.is_gap_cursor(1));
+        assert!(!state.is_gap_cursor(3));
+        assert!(!state.is_gap_cursor(14));
+    }
+
+    #[test]
+    fn is_gap_cursor_at_atom_boundary_is_true() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        // Navigate to gap positions to verify they're valid gap cursors.
+        state.set_selection(Selection::cursor(4));
+        state.move_right(); // pos 5 (gap before atom)
+        assert!(state.is_gap_cursor(state.selection().head));
+
+        state.move_right(); // pos 12 (gap after atom)
+        assert!(state.is_gap_cursor(state.selection().head));
+    }
+
+    #[test]
+    fn gap_cursor_info_returns_correct_side() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+
+        // Navigate to gap before atom.
+        state.set_selection(Selection::cursor(4)); // end of "abc"
+        state.move_right(); // -> gap at 5
+        assert_eq!(state.selection().head, 5);
+        let info = state.gap_cursor_info();
+        assert!(info.is_some());
+        let (side, start, end) = info.unwrap();
+        assert_eq!(side, GapSide::Before);
+        assert_eq!(start, 5);
+        assert_eq!(end, 12);
+
+        // Navigate to gap after atom.
+        state.move_right(); // -> gap at 12
+        assert_eq!(state.selection().head, 12);
+        let info = state.gap_cursor_info();
+        assert!(info.is_some());
+        let (side, start, end) = info.unwrap();
+        assert_eq!(side, GapSide::After);
+        assert_eq!(start, 5);
+        assert_eq!(end, 12);
+    }
+
+    #[test]
+    fn snap_out_of_atom_inside_atomic_block() {
+        let (doc, atoms) = para_atom_para_doc();
+        let state = DocState::from_doc_with_atoms(doc, atoms);
+        // Position 8 is inside the atomic block content.
+        // Block is at 5..12. pos 8 is closer to 5 (distance 3) than 12 (distance 4).
+        assert_eq!(state.snap_out_of_atom(8), 5);
+        // Position 10 is closer to 12 (distance 2) than 5 (distance 5).
+        assert_eq!(state.snap_out_of_atom(10), 12);
+    }
+
+    #[test]
+    fn snap_out_of_atom_outside_atom_unchanged() {
+        let (doc, atoms) = para_atom_para_doc();
+        let state = DocState::from_doc_with_atoms(doc, atoms);
+        assert_eq!(state.snap_out_of_atom(1), 1);
+        assert_eq!(state.snap_out_of_atom(4), 4);
+        assert_eq!(state.snap_out_of_atom(14), 14);
+    }
+}

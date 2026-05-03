@@ -4,7 +4,7 @@ use crate::attrs::{get_attr, AttrValue};
 use crate::mark::MarkType;
 use crate::position::ResolvedPos;
 
-use super::{DocState, FormattingState, Selection};
+use super::{DocState, FormattingState, GapSide, Selection};
 
 impl DocState {
     // ── Position adjustment ─────────────────────────────────────────────
@@ -244,6 +244,149 @@ impl DocState {
         let start = resolved.start(resolved.depth);
         let end = resolved.end(resolved.depth);
         self.selection = Selection::range(start, end);
+    }
+
+    // ── Gap cursor ────────────────────────────────────────────────────
+
+    /// Check if `pos` is a valid gap cursor position: between blocks where
+    /// at least one neighbor is an atomic block.
+    pub fn is_gap_cursor(&self, pos: usize) -> bool {
+        let resolved = self.doc.resolve(pos);
+        if resolved.parent().node_type.is_textblock() {
+            return false;
+        }
+        let before = resolved.node_before();
+        let after = resolved.node_after();
+        before.is_some_and(|n| n.is_atom()) || after.is_some_and(|n| n.is_atom())
+    }
+
+    /// If the current cursor is at a gap position next to an atomic block,
+    /// return the side and the block's `(pos_start, pos_end)` range.
+    pub fn gap_cursor_info(&self) -> Option<(GapSide, usize, usize)> {
+        if !self.selection.is_cursor() {
+            return None;
+        }
+        let pos = self.selection.head;
+        let resolved = self.doc.resolve(pos);
+        if resolved.parent().node_type.is_textblock() {
+            return None;
+        }
+
+        if let Some(after) = resolved.node_after() {
+            if after.is_atom() {
+                return Some((GapSide::Before, pos, pos + after.node_size()));
+            }
+        }
+        if let Some(before) = resolved.node_before() {
+            if before.is_atom() {
+                return Some((GapSide::After, pos - before.node_size(), pos));
+            }
+        }
+        None
+    }
+
+    /// If `pos` is inside an atomic block, snap it to the nearest boundary
+    /// (before or after the block). Returns `pos` unchanged if not inside
+    /// an atom.
+    pub fn snap_out_of_atom(&self, pos: usize) -> usize {
+        let resolved = self.doc.resolve(pos);
+        for d in (1..=resolved.depth).rev() {
+            let ancestor = resolved.node(d);
+            if ancestor.is_atom() {
+                let before = resolved.before(d);
+                let after = resolved.after(d);
+                if pos - before <= after - pos {
+                    return before;
+                }
+                return after;
+            }
+        }
+        pos
+    }
+
+    // ── Cursor movement ──────────────────────────────────────────────
+
+    /// Move the cursor one position to the right, treating atomic blocks
+    /// as single characters.
+    pub fn move_right(&mut self) {
+        let pos = self.selection.head;
+        let doc_size = self.doc.content.size();
+        if pos >= doc_size {
+            return;
+        }
+
+        let resolved = self.doc.resolve(pos);
+
+        if resolved.parent().node_type.is_textblock() {
+            if resolved.parent_offset < resolved.parent().content.size() {
+                self.set_selection_raw(Selection::cursor(pos + 1));
+            } else {
+                let gap_pos = resolved.after(resolved.depth);
+                self.settle_at_gap(gap_pos, true);
+            }
+        } else if let Some(after) = resolved.node_after() {
+            if after.is_atom() {
+                let past_atom = pos + after.node_size();
+                self.settle_at_gap(past_atom, true);
+            } else {
+                self.set_selection_raw(Selection::cursor(pos + 1));
+            }
+        }
+    }
+
+    /// Move the cursor one position to the left, treating atomic blocks
+    /// as single characters.
+    pub fn move_left(&mut self) {
+        let pos = self.selection.head;
+        if pos == 0 {
+            return;
+        }
+
+        let resolved = self.doc.resolve(pos);
+
+        if resolved.parent().node_type.is_textblock() {
+            if resolved.parent_offset > 0 {
+                self.set_selection_raw(Selection::cursor(pos - 1));
+            } else {
+                let gap_pos = resolved.before(resolved.depth);
+                self.settle_at_gap(gap_pos, false);
+            }
+        } else if let Some(before) = resolved.node_before() {
+            if before.is_atom() {
+                let before_atom = pos - before.node_size();
+                self.settle_at_gap(before_atom, false);
+            } else {
+                self.set_selection_raw(Selection::cursor(pos - 1));
+            }
+        }
+    }
+
+    /// Given a gap position, decide whether it's a valid gap cursor
+    /// (adjacent to an atom) or should be entered into an adjacent textblock.
+    fn settle_at_gap(&mut self, gap_pos: usize, forward: bool) {
+        let doc_size = self.doc.content.size();
+        let gap_pos = gap_pos.min(doc_size);
+
+        let resolved = self.doc.resolve(gap_pos);
+        let before = resolved.node_before();
+        let after = resolved.node_after();
+
+        let has_atom = before.is_some_and(|n| n.is_atom())
+            || after.is_some_and(|n| n.is_atom());
+
+        if has_atom {
+            self.set_selection_raw(Selection::cursor(gap_pos));
+        } else if forward {
+            if after.is_some_and(|n| n.node_type.is_textblock()) {
+                self.set_selection_raw(Selection::cursor(gap_pos + 1));
+            } else {
+                self.set_selection_raw(Selection::cursor(gap_pos));
+            }
+        } else if before.is_some_and(|n| n.node_type.is_textblock()) {
+            self.set_selection_raw(Selection::cursor(gap_pos - 1));
+        } else {
+            self.set_selection_raw(Selection::cursor(gap_pos));
+        }
     }
 
     // ── Internal helpers ───────────────────────────────────────────────

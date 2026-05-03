@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use kode_doc::mark::MarkType;
-use kode_doc::{DocState, FormattingState, Selection};
+use kode_doc::{DocState, FormattingState, GapSide, Selection};
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::AnyView;
 use wasm_bindgen::closure::Closure;
@@ -98,6 +98,7 @@ pub fn TreeWysiwygEditor(
     let last_ext_version = std::cell::Cell::new(0u64);
 
     let editor_ref = NodeRef::<leptos::html::Div>::new();
+    let gap_cursor_ref = NodeRef::<leptos::html::Div>::new();
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
     struct DragState {
@@ -287,6 +288,7 @@ pub fn TreeWysiwygEditor(
 
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
+        let gap_cursor_raf = gap_cursor_ref;
 
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
@@ -294,15 +296,27 @@ pub fn TreeWysiwygEditor(
 
             let Ok(ds) = doc_raf.lock() else { return };
             let sel = ds.selection().clone();
+            let gap_info = ds.gap_cursor_info();
             drop(ds);
 
             let head = sel.head;
             let anchor = sel.anchor;
 
-            if sel.is_cursor() {
-                restore_cursor(container_el, head);
+            if let Some((side, block_start, block_end)) = gap_info {
+                show_gap_cursor(container_el, gap_cursor_raf, side, block_start, block_end);
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(sel)) = window.get_selection() {
+                        let _ = sel.remove_all_ranges();
+                    }
+                }
+                let _ = container_el.dyn_ref::<HtmlElement>().map(|el| el.focus());
             } else {
-                restore_range(container_el, anchor, head);
+                hide_gap_cursor(gap_cursor_raf);
+                if sel.is_cursor() {
+                    restore_cursor(container_el, head);
+                } else {
+                    restore_range(container_el, anchor, head);
+                }
             }
         });
         let _ = web_sys::window()
@@ -1008,6 +1022,15 @@ pub fn TreeWysiwygEditor(
                 }
                 applied
             }
+            // ── Arrow key navigation (atomic block awareness) ──────
+            "ArrowRight" if !ctrl && !shift => {
+                ds.move_right();
+                true
+            }
+            "ArrowLeft" if !ctrl && !shift => {
+                ds.move_left();
+                true
+            }
             _ => false,
         };
 
@@ -1073,6 +1096,7 @@ pub fn TreeWysiwygEditor(
     {
         let doc_selchange = doc_state.clone();
         let editor_selchange = editor_ref;
+        let gap_cursor_selchange = gap_cursor_ref;
         let extensions_for_effectchange = Arc::clone(&extensions);
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
             if composing.get_untracked() {
@@ -1091,6 +1115,27 @@ pub fn TreeWysiwygEditor(
 
             let Ok(mut ds) = doc_selchange.lock() else { return };
             sync_selection_to_doc(&mut ds, container_el);
+
+            if let Some((side, block_start, block_end)) = ds.gap_cursor_info() {
+                let fmt = ds.formatting_at_cursor();
+                let ext_states = if !extensions_for_effectchange.is_empty() {
+                    Some(compute_extension_active_states(&ds, &fmt, &extensions_for_effectchange))
+                } else {
+                    None
+                };
+                drop(ds);
+                show_gap_cursor(container_el, gap_cursor_selchange, side, block_start, block_end);
+                if let Ok(Some(sel)) = window.get_selection() {
+                    let _ = sel.remove_all_ranges();
+                }
+                if let Some(states) = ext_states {
+                    extension_active_state.set(states);
+                }
+                formatting_state.set(fmt);
+                return;
+            }
+
+            hide_gap_cursor(gap_cursor_selchange);
             let fmt = ds.formatting_at_cursor();
 
             let ext_states = if !extensions_for_effectchange.is_empty() {
@@ -1353,6 +1398,10 @@ pub fn TreeWysiwygEditor(
                 on:compositionstart=on_composition_start
                 on:compositionend=on_composition_end
             />
+            <div
+                node_ref=gap_cursor_ref
+                class="kode-gap-cursor"
+            />
         </div>
     }
 }
@@ -1377,11 +1426,14 @@ fn sync_selection_to_doc(ds: &mut DocState, container: &web_sys::Element) {
 
     let Some(head) = focus_pos else { return };
 
+    let head = ds.snap_out_of_atom(head);
+
     if sel.is_collapsed() {
         ds.set_selection(Selection::cursor(head));
     } else if let Some(anchor_node) = sel.anchor_node() {
         let anchor = node_offset_to_doc_pos(container, &anchor_node, sel.anchor_offset())
             .unwrap_or(head);
+        let anchor = ds.snap_out_of_atom(anchor);
         ds.set_selection(Selection::range(anchor, head));
     } else {
         ds.set_selection(Selection::cursor(head));
@@ -2159,4 +2211,64 @@ fn resolve_grid_group_positions(grid_wrapper: &web_sys::Element) -> Option<(usiz
     let group_end = if last_block_level { last_raw } else { last_raw + 1 };
 
     Some((group_start, group_end))
+}
+
+// ── Gap cursor rendering ──────────────────────────────���──────────────────
+
+/// Show the gap cursor element positioned at the edge of an atomic block.
+fn show_gap_cursor(
+    container: &web_sys::Element,
+    gap_ref: NodeRef<leptos::html::Div>,
+    side: GapSide,
+    block_start: usize,
+    block_end: usize,
+) {
+    let Some(gap_el) = gap_ref.get() else { return };
+    let gap_el: &web_sys::HtmlElement = gap_el.as_ref();
+
+    let selector = format!(
+        "[data-pos-start=\"{}\"][data-pos-end=\"{}\"]",
+        block_start, block_end,
+    );
+    let block_el = match container.query_selector(&selector) {
+        Ok(Some(el)) => el,
+        _ => {
+            let _ = gap_el.style().set_property("display", "none");
+            return;
+        }
+    };
+
+    let block_rect = block_el.get_bounding_client_rect();
+
+    // The gap cursor has `position: absolute` and resolves against its
+    // offset parent (wysiwyg-container, which has `position: relative`).
+    // Use the offset parent's rect so the calculation is correct even when
+    // a toolbar sits between wysiwyg-container and the scroll container.
+    let origin_rect = gap_el
+        .offset_parent()
+        .map(|p| p.get_bounding_client_rect())
+        .unwrap_or_else(|| container.get_bounding_client_rect());
+
+    let left = block_rect.left() - origin_rect.left();
+
+    let top = match side {
+        GapSide::Before => block_rect.top() - origin_rect.top() - 1.0,
+        GapSide::After => block_rect.bottom() - origin_rect.top(),
+    };
+
+    let _ = gap_el.style().set_property("display", "block");
+    let _ = gap_el.style().set_property("top", &format!("{top}px"));
+    let _ = gap_el.style().set_property("left", &format!("{left}px"));
+    let _ = gap_el.style().set_property(
+        "width",
+        &format!("{}px", block_rect.width().min(20.0)),
+    );
+}
+
+/// Hide the gap cursor element.
+fn hide_gap_cursor(gap_ref: NodeRef<leptos::html::Div>) {
+    if let Some(gap_el) = gap_ref.get() {
+        let gap_el: &web_sys::HtmlElement = gap_el.as_ref();
+        let _ = gap_el.style().set_property("display", "none");
+    }
 }
