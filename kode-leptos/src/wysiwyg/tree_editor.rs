@@ -302,16 +302,16 @@ pub fn TreeWysiwygEditor(
             let head = sel.head;
             let anchor = sel.anchor;
 
+
+
             if let Some((side, block_start, block_end)) = gap_info {
                 show_gap_cursor(container_el, gap_cursor_raf, side, block_start, block_end);
-                if let Some(window) = web_sys::window() {
-                    if let Ok(Some(sel)) = window.get_selection() {
-                        let _ = sel.remove_all_ranges();
-                    }
-                }
-                let _ = container_el.dyn_ref::<HtmlElement>().map(|el| el.focus());
+                let _ = container_el.dyn_ref::<HtmlElement>()
+                    .map(|el| el.style().set_property("caret-color", "transparent"));
             } else {
                 hide_gap_cursor(gap_cursor_raf);
+                let _ = container_el.dyn_ref::<HtmlElement>()
+                    .map(|el| el.style().remove_property("caret-color"));
                 if sel.is_cursor() {
                     restore_cursor(container_el, head);
                 } else {
@@ -963,14 +963,35 @@ pub fn TreeWysiwygEditor(
 
         let Ok(mut ds) = doc_key.lock() else { return };
 
-        // Sync selection before handling the shortcut.
-        if let Some(container) = editor_ref.get() {
-            let container_el: &web_sys::Element = container.as_ref();
-            sync_selection_to_doc(&mut ds, container_el);
-        }
-
+        // The DocState position is authoritative for all keyboard
+        // operations. It's kept in sync by selectionchange (mouse) and
+        // beforeinput (text input). No browser sync needed here.
         let handled = match key.as_str() {
-            // ── Inline formatting shortcuts ──────────────────────────
+            "ArrowRight" if !ctrl && !shift => {
+                ds.move_right();
+                true
+            }
+            "ArrowLeft" if !ctrl && !shift => {
+                ds.move_left();
+                true
+            }
+            "Enter" if !ctrl => {
+                ds.split_block();
+                true
+            }
+            "Backspace" => {
+                ds.backspace();
+                true
+            }
+            "Delete" => {
+                ds.delete_forward();
+                true
+            }
+            _ => false,
+        };
+
+        let handled = if !handled {
+            match key.as_str() {
             "b" if ctrl => {
                 ds.toggle_mark(MarkType::Strong);
                 true
@@ -988,14 +1009,12 @@ pub fn TreeWysiwygEditor(
                 true
             }
             "a" if ctrl => {
-                // Select all
                 let doc_size = ds.doc().content.size();
                 if doc_size > 0 {
                     ds.set_selection(Selection::range(0, doc_size));
                 }
                 true
             }
-            // ── Tab / Shift+Tab list indentation ────────────────────
             "Tab" if !ctrl => {
                 let md = ds.to_markdown();
                 let cursor_byte = kode_doc::tree_pos_to_byte_offset(ds.doc(), &md, ds.selection().head);
@@ -1022,16 +1041,10 @@ pub fn TreeWysiwygEditor(
                 }
                 applied
             }
-            // ── Arrow key navigation (atomic block awareness) ──────
-            "ArrowRight" if !ctrl && !shift => {
-                ds.move_right();
-                true
-            }
-            "ArrowLeft" if !ctrl && !shift => {
-                ds.move_left();
-                true
-            }
             _ => false,
+            }
+        } else {
+            true
         };
 
         // Extension keyboard shortcuts (checked after built-in shortcuts).
@@ -1125,9 +1138,6 @@ pub fn TreeWysiwygEditor(
                 };
                 drop(ds);
                 show_gap_cursor(container_el, gap_cursor_selchange, side, block_start, block_end);
-                if let Ok(Some(sel)) = window.get_selection() {
-                    let _ = sel.remove_all_ranges();
-                }
                 if let Some(states) = ext_states {
                     extension_active_state.set(states);
                 }
@@ -2249,19 +2259,19 @@ fn show_gap_cursor(
         .map(|p| p.get_bounding_client_rect())
         .unwrap_or_else(|| container.get_bounding_client_rect());
 
-    let left = block_rect.left() - origin_rect.left();
+    let top = block_rect.top() - origin_rect.top();
 
-    let top = match side {
-        GapSide::Before => block_rect.top() - origin_rect.top() - 1.0,
-        GapSide::After => block_rect.bottom() - origin_rect.top(),
+    let left = match side {
+        GapSide::Before => block_rect.left() - origin_rect.left(),
+        GapSide::After => block_rect.right() - origin_rect.left(),
     };
 
     let _ = gap_el.style().set_property("display", "block");
     let _ = gap_el.style().set_property("top", &format!("{top}px"));
     let _ = gap_el.style().set_property("left", &format!("{left}px"));
     let _ = gap_el.style().set_property(
-        "width",
-        &format!("{}px", block_rect.width().min(20.0)),
+        "height",
+        &format!("{}px", block_rect.height()),
     );
 }
 

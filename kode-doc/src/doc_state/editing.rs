@@ -267,33 +267,33 @@ impl DocState {
                 return;
             }
 
-            // Paragraph at start — try to join with the previous block.
-            if !self.join_backward() {
-                // Join failed (e.g., previous node is not a textblock, or
-                // we're at the first block). If the paragraph is empty,
-                // delete it entirely so backspace doesn't get stuck.
-                let parent_content_size = resolved.parent().content.size();
-                if parent_content_size == 0 && resolved.depth > 0 {
-                    let block_start = resolved.before(resolved.depth);
-                    let block_end = resolved.after(resolved.depth);
-                    self.push_undo();
-                    let mut tr = Transform::new(self.doc.clone());
-                    if tr.delete(block_start, block_end).is_ok() {
-                        self.doc = tr.doc;
-                        let target = if block_start > 0 {
-                            self.adjust_into_textblock(
-                                (block_start - 1).min(self.doc.content.size())
-                            )
-                        } else {
-                            self.adjust_into_textblock(
-                                block_start.min(self.doc.content.size())
-                            )
-                        };
-                        self.selection = Selection::cursor(target);
-                    }
-                    self.redo_stack.clear();
+            // Empty paragraph: delete the paragraph itself rather than
+            // joining backward (which would destroy an adjacent atomic block).
+            let parent_content_size = resolved.parent().content.size();
+            if parent_content_size == 0 && resolved.depth > 0 {
+                let block_start = resolved.before(resolved.depth);
+                let block_end = resolved.after(resolved.depth);
+                self.push_undo();
+                let mut tr = Transform::new(self.doc.clone());
+                if tr.delete(block_start, block_end).is_ok() {
+                    self.doc = tr.doc;
+                    let target = if block_start > 0 {
+                        self.adjust_into_textblock(
+                            (block_start - 1).min(self.doc.content.size())
+                        )
+                    } else {
+                        self.adjust_into_textblock(
+                            block_start.min(self.doc.content.size())
+                        )
+                    };
+                    self.selection = Selection::cursor(target);
                 }
+                self.redo_stack.clear();
+                return;
             }
+
+            // Non-empty paragraph at start — try to join with the previous block.
+            self.join_backward();
             return;
         }
 
@@ -363,20 +363,39 @@ impl DocState {
         if resolved.parent().node_type.is_textblock()
             && resolved.parent_offset == resolved.parent().content.size()
         {
-            // At the end of a textblock — check if the next block is atomic.
             let after_pos = resolved.after(resolved.depth);
+
+            // Empty paragraph before an atomic block: remove the paragraph
+            // rather than deleting the atom.
+            if resolved.parent().content.size() == 0 && resolved.depth > 0 {
+                let block_start = resolved.before(resolved.depth);
+                let block_end = resolved.after(resolved.depth);
+                self.push_undo();
+                let mut tr = Transform::new(self.doc.clone());
+                if tr.delete(block_start, block_end).is_ok() {
+                    self.doc = tr.doc;
+                    self.selection = Selection::cursor(
+                        self.adjust_into_textblock(
+                            block_start.min(self.doc.content.size())
+                        )
+                    );
+                }
+                self.redo_stack.clear();
+                return;
+            }
+
+            // At the end of a non-empty textblock — if the next block is
+            // atomic, delete it (single-character delete-forward).
             if after_pos < doc_size {
                 let after_resolved = self.doc.resolve(after_pos);
                 if let Some(next_node) = after_resolved.node_after() {
                     if next_node.is_atom() {
-                        // Delete the entire atomic block.
                         let atom_size = next_node.node_size();
                         let delete_to = after_pos + atom_size;
                         self.push_undo();
                         let mut tr = Transform::new(self.doc.clone());
                         if tr.delete(after_pos, delete_to).is_ok() {
                             self.doc = tr.doc;
-                            // Cursor stays at current position.
                         }
                         self.redo_stack.clear();
                         return;

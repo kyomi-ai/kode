@@ -3001,4 +3001,121 @@ mod cursor_movement_tests {
         assert_eq!(state.snap_out_of_atom(4), 4);
         assert_eq!(state.snap_out_of_atom(14), 14);
     }
+
+    #[test]
+    fn enter_then_delete_at_gap_removes_empty_para() {
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+        // Navigate to gap before atom.
+        state.set_selection(Selection::cursor(4));
+        state.move_right(); // gap at 5
+        assert!(state.gap_cursor_info().is_some());
+
+        let children_before = state.doc().child_count();
+        // Enter creates a new empty paragraph.
+        state.split_block();
+        assert_eq!(state.doc().child_count(), children_before + 1);
+
+        // Delete should remove the empty paragraph, not the atom.
+        state.delete_forward();
+        assert_eq!(state.doc().child_count(), children_before,
+            "delete should remove the empty paragraph, not the atom");
+    }
+
+    #[test]
+    fn delete_forward_in_empty_para_before_atom_removes_para() {
+        // <doc><atom>chart</atom><p></p><atom>chart2</atom></doc>
+        // Cursor in the empty paragraph — Delete should remove the paragraph,
+        // not delete the next atomic block.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("chart")),
+        );
+        let empty_p = Node::branch(NodeType::Paragraph, Fragment::empty());
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("chart2")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, empty_p, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+
+        // cb1: size 7 (0..7), empty_p: size 2 (7..9), cb2: size 8 (9..17)
+        // Cursor inside empty paragraph = position 8
+        state.set_selection(Selection::cursor(8));
+
+        let child_count_before = state.doc().child_count();
+        state.delete_forward();
+
+        // The empty paragraph should be removed, both atoms should remain.
+        assert_eq!(state.doc().child_count(), child_count_before - 1,
+            "empty paragraph should be deleted, not the atomic block");
+        assert_eq!(state.doc().child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc().child(1).node_type, NodeType::CodeBlock);
+    }
+
+    #[test]
+    fn backspace_in_empty_para_between_atoms_removes_para() {
+        // Reproduces the Mac Delete key bug: user navigates between two
+        // side-by-side atomic charts, presses Enter to create a paragraph,
+        // then presses Backspace (Mac Delete). The backspace should remove
+        // the empty paragraph, not destroy an atomic block.
+        let (doc, atoms) = para_atom_para_doc();
+        let mut state = DocState::from_doc_with_atoms(doc, atoms);
+
+        // Navigate to gap between the atom and p2.
+        state.set_selection(Selection::cursor(4)); // end of "abc"
+        state.move_right(); // gap at 5 (before atom)
+        state.move_right(); // gap at 12 (after atom, before p2)
+
+        // Enter creates a paragraph at the gap.
+        state.split_block();
+        let children_after_enter = state.doc().child_count();
+        assert_eq!(children_after_enter, 4, "should be p1, atom, new_p, p2");
+
+        // Backspace should remove the empty paragraph, not the atom.
+        state.backspace();
+        assert_eq!(state.doc().child_count(), 3,
+            "backspace should remove the empty paragraph, not the atom");
+
+        // Verify all original nodes are intact.
+        assert_eq!(state.doc().child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc().child(0).text_content(), "abc");
+        assert!(state.doc().child(1).is_atom());
+        assert_eq!(state.doc().child(2).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc().child(2).text_content(), "def");
+    }
+
+    #[test]
+    fn backspace_in_empty_para_between_two_atoms_removes_para() {
+        // Two adjacent atomic blocks with an empty paragraph between them.
+        let cb1 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("chartml"),
+            Fragment::from_node(Node::new_text("chart1")),
+        );
+        let empty_p = Node::branch(NodeType::Paragraph, Fragment::empty());
+        let cb2 = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs("mermaid"),
+            Fragment::from_node(Node::new_text("chart2")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_vec(vec![cb1, empty_p, cb2]));
+        let mut state = DocState::from_doc_with_atoms(doc, atomic_set(&["chartml", "mermaid"]));
+
+        // Cursor inside the empty paragraph.
+        // cb1: size 8 (0..8), empty_p: size 2 (8..10), cb2: size 8 (10..18)
+        // Position 9 is inside empty_p content.
+        state.set_selection(Selection::cursor(9));
+
+        state.backspace();
+
+        assert_eq!(state.doc().child_count(), 2,
+            "backspace should remove the empty paragraph");
+        assert_eq!(state.doc().child(0).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc().child(1).node_type, NodeType::CodeBlock);
+        assert_eq!(state.doc().child(0).text_content(), "chart1");
+        assert_eq!(state.doc().child(1).text_content(), "chart2");
+    }
 }

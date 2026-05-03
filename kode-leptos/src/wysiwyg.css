@@ -309,10 +309,10 @@ pre.wysiwyg-code-block code {
 .kode-gap-cursor {
     display: none;
     position: absolute;
-    height: 2px;
+    width: 2px;
     pointer-events: none;
     z-index: 10;
-    background: var(--kode-gap-cursor-color, var(--kode-accent, #3b82f6));
+    background: var(--kode-gap-cursor-color, var(--kode-fg-bright, #000));
     animation: kode-gap-cursor-blink 1.06s steps(1) infinite;
 }
 
