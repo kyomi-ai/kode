@@ -258,9 +258,10 @@ impl DocState {
 
     /// Set the selection without adjusting positions into textblocks.
     ///
-    /// Used internally by cursor movement methods that deliberately place
-    /// the cursor at gap positions next to atomic blocks.
-    pub(super) fn set_selection_raw(&mut self, selection: Selection) {
+    /// Used by cursor movement methods and the gap cursor click handler
+    /// that deliberately place the cursor at gap positions next to atomic
+    /// blocks.
+    pub fn set_selection_raw(&mut self, selection: Selection) {
         self.selection = selection;
     }
 
