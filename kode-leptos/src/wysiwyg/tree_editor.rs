@@ -99,6 +99,7 @@ pub fn TreeWysiwygEditor(
 
     let editor_ref = NodeRef::<leptos::html::Div>::new();
     let gap_cursor_ref = NodeRef::<leptos::html::Div>::new();
+    let keydown_handled = std::rc::Rc::new(std::cell::Cell::new(false));
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
     struct DragState {
@@ -230,6 +231,7 @@ pub fn TreeWysiwygEditor(
     let prev_segments_for_effect = prev_segments.clone();
     let ext_ctx_for_effect = extension_context.clone();
     let can_drag_for_effect = can_drag_block.clone();
+    let keydown_handled_effect = keydown_handled.clone();
     Effect::new(move |_| {
         let _v = version.get();
         let is_composing = composing.get();
@@ -289,6 +291,7 @@ pub fn TreeWysiwygEditor(
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
         let gap_cursor_raf = gap_cursor_ref;
+        let kd_handled_raf = keydown_handled_effect.clone();
 
         let cb = Closure::once(move || {
             let Some(container) = editor_raf.get() else { return };
@@ -302,16 +305,16 @@ pub fn TreeWysiwygEditor(
             let head = sel.head;
             let anchor = sel.anchor;
 
-
-
             if let Some((side, block_start, block_end)) = gap_info {
                 show_gap_cursor(container_el, gap_cursor_raf, side, block_start, block_end);
                 let _ = container_el.dyn_ref::<HtmlElement>()
                     .map(|el| el.style().set_property("caret-color", "transparent"));
+                // Keep kd_handled set — selectionchange must stay suppressed
+                // while the gap cursor is active, otherwise the browser's
+                // stale cursor position overwrites the gap position.
             } else {
-                hide_gap_cursor(gap_cursor_raf);
-                let _ = container_el.dyn_ref::<HtmlElement>()
-                    .map(|el| el.style().remove_property("caret-color"));
+                hide_gap_cursor(gap_cursor_raf, editor_raf);
+                kd_handled_raf.set(false);
                 if sel.is_cursor() {
                     restore_cursor(container_el, head);
                 } else {
@@ -914,6 +917,7 @@ pub fn TreeWysiwygEditor(
     let doc_key = doc_state.clone();
     let notify_key = notify.clone();
     let extension_shortcuts_key: Arc<Vec<ExtensionKeyboardShortcut>> = Arc::clone(&extension_shortcuts);
+    let keydown_handled_key = keydown_handled.clone();
     let on_keydown = move |ev: KeyboardEvent| {
         if composing.get_untracked() {
             return;
@@ -974,6 +978,55 @@ pub fn TreeWysiwygEditor(
             "ArrowLeft" if !ctrl && !shift => {
                 ds.move_left();
                 true
+            }
+            "ArrowDown" if !ctrl && !shift => {
+                if ds.gap_cursor_info().is_some() {
+                    ds.move_right();
+                    true
+                } else {
+                    // Check if the next block after the current textblock is
+                    // atomic. If so, move to the gap before it rather than
+                    // letting the browser skip past it.
+                    let pos = ds.selection().head;
+                    let resolved = ds.doc().resolve(pos);
+                    if resolved.parent().node_type.is_textblock() && resolved.depth > 0 {
+                        let after_pos = resolved.after(resolved.depth);
+                        let after_resolved = ds.doc().resolve(after_pos.min(ds.doc().content.size()));
+                        if after_resolved.node_after().is_some_and(|n| n.is_atom()) {
+                            ds.set_selection_raw(Selection::cursor(after_pos));
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+            }
+            "ArrowUp" if !ctrl && !shift => {
+                if ds.gap_cursor_info().is_some() {
+                    ds.move_left();
+                    true
+                } else {
+                    let pos = ds.selection().head;
+                    let resolved = ds.doc().resolve(pos);
+                    if resolved.parent().node_type.is_textblock() && resolved.depth > 0 {
+                        let before_pos = resolved.before(resolved.depth);
+                        if before_pos > 0 {
+                            let before_resolved = ds.doc().resolve(before_pos);
+                            if before_resolved.node_before().is_some_and(|n| n.is_atom()) {
+                                ds.set_selection_raw(Selection::cursor(before_pos));
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
             }
             "Enter" if !ctrl => {
                 ds.split_block();
@@ -1072,6 +1125,7 @@ pub fn TreeWysiwygEditor(
         };
 
         if handled {
+            keydown_handled_key.set(true);
             let md = ds.to_markdown();
             drop(ds);
             (notify_key)(Some(md));
@@ -1111,8 +1165,14 @@ pub fn TreeWysiwygEditor(
         let editor_selchange = editor_ref;
         let gap_cursor_selchange = gap_cursor_ref;
         let extensions_for_effectchange = Arc::clone(&extensions);
+        let kd_handled_selchange = keydown_handled.clone();
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
             if composing.get_untracked() {
+                return;
+            }
+            // After a keydown edit, the DocState position is authoritative.
+            // Skip sync until the rAF restores the cursor.
+            if kd_handled_selchange.get() {
                 return;
             }
             let Some(container) = editor_selchange.get() else { return };
@@ -1145,7 +1205,7 @@ pub fn TreeWysiwygEditor(
                 return;
             }
 
-            hide_gap_cursor(gap_cursor_selchange);
+            hide_gap_cursor(gap_cursor_selchange, editor_selchange);
             let fmt = ds.formatting_at_cursor();
 
             let ext_states = if !extensions_for_effectchange.is_empty() {
@@ -1382,6 +1442,69 @@ pub fn TreeWysiwygEditor(
         None
     };
 
+    // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
+    let doc_md = doc_state.clone();
+    let gap_cursor_md = gap_cursor_ref;
+    let on_mousedown = move |ev: MouseEvent| {
+        let Some(target) = ev.target() else { return };
+        let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+
+        // Walk up from the click target to find an atomic extension block.
+        let mut el = Some(target_el.clone());
+        let mut ext_el: Option<web_sys::Element> = None;
+        while let Some(ref current) = el {
+            if current.has_attribute("data-kode-extension") {
+                ext_el = Some(current.clone());
+                break;
+            }
+            if current.has_attribute("contenteditable")
+                && current.get_attribute("contenteditable").as_deref() == Some("true")
+            {
+                break;
+            }
+            el = current.parent_element();
+        }
+
+        let Some(block) = ext_el else { return };
+
+        ev.prevent_default();
+
+        let Some(ps) = block.get_attribute("data-pos-start") else { return };
+        let Some(pe) = block.get_attribute("data-pos-end") else { return };
+        let Ok(pos_start) = ps.parse::<usize>() else { return };
+        let Ok(pos_end) = pe.parse::<usize>() else { return };
+
+        // Before or after? Compare click Y to block center.
+        let rect = block.get_bounding_client_rect();
+        let mid_y = rect.top() + rect.height() / 2.0;
+        let gap_pos = if (ev.client_y() as f64) < mid_y {
+            pos_start
+        } else {
+            pos_end
+        };
+
+        let Ok(mut ds) = doc_md.lock() else { return };
+        ds.set_selection_raw(Selection::cursor(gap_pos));
+
+        if let Some((side, bs, be)) = ds.gap_cursor_info() {
+            drop(ds);
+            if let Some(container) = editor_ref.get() {
+                let container_el: &web_sys::Element = container.as_ref();
+                show_gap_cursor(container_el, gap_cursor_md, side, bs, be);
+                let _ = container.dyn_ref::<HtmlElement>().map(|el| {
+                    let _ = el.style().set_property("caret-color", "transparent");
+                    let _ = el.focus();
+                });
+            }
+        } else {
+            drop(ds);
+            if let Some(container) = editor_ref.get() {
+                let _ = container.dyn_ref::<HtmlElement>().map(|el| el.focus());
+            }
+        }
+        version.update(|v| *v += 1);
+    };
+
     // ── Render ───────────────────────────────────────────────────────────
     let theme_css = move || theme.get().syntax_css("pre.kode-content");
 
@@ -1405,6 +1528,7 @@ pub fn TreeWysiwygEditor(
                 contenteditable="true"
                 spellcheck="false"
                 on:keydown=on_keydown
+                on:mousedown=on_mousedown
                 on:compositionstart=on_composition_start
                 on:compositionend=on_composition_end
             />
@@ -2248,12 +2372,14 @@ fn show_gap_cursor(
         }
     };
 
+
+
     let block_rect = block_el.get_bounding_client_rect();
 
-    // The gap cursor has `position: absolute` and resolves against its
-    // offset parent (wysiwyg-container, which has `position: relative`).
-    // Use the offset parent's rect so the calculation is correct even when
-    // a toolbar sits between wysiwyg-container and the scroll container.
+    // Make the gap cursor visible BEFORE querying offset_parent —
+    // browsers return null for offset_parent on display:none elements.
+    let _ = gap_el.style().set_property("display", "block");
+
     let origin_rect = gap_el
         .offset_parent()
         .map(|p| p.get_bounding_client_rect())
@@ -2265,8 +2391,6 @@ fn show_gap_cursor(
         GapSide::Before => block_rect.left() - origin_rect.left(),
         GapSide::After => block_rect.right() - origin_rect.left(),
     };
-
-    let _ = gap_el.style().set_property("display", "block");
     let _ = gap_el.style().set_property("top", &format!("{top}px"));
     let _ = gap_el.style().set_property("left", &format!("{left}px"));
     let _ = gap_el.style().set_property(
@@ -2276,9 +2400,13 @@ fn show_gap_cursor(
 }
 
 /// Hide the gap cursor element.
-fn hide_gap_cursor(gap_ref: NodeRef<leptos::html::Div>) {
+fn hide_gap_cursor(gap_ref: NodeRef<leptos::html::Div>, editor_ref: NodeRef<leptos::html::Div>) {
     if let Some(gap_el) = gap_ref.get() {
         let gap_el: &web_sys::HtmlElement = gap_el.as_ref();
         let _ = gap_el.style().set_property("display", "none");
+    }
+    if let Some(editor) = editor_ref.get() {
+        let _ = editor.dyn_ref::<HtmlElement>()
+            .map(|el| el.style().remove_property("caret-color"));
     }
 }
