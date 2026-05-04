@@ -294,8 +294,6 @@ pub fn TreeWysiwygEditor(
         let kd_handled_raf = keydown_handled_effect.clone();
 
         let cb = Closure::once(move || {
-            kd_handled_raf.set(false);
-
             let Some(container) = editor_raf.get() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
@@ -307,14 +305,16 @@ pub fn TreeWysiwygEditor(
             let head = sel.head;
             let anchor = sel.anchor;
 
-
-
             if let Some((side, block_start, block_end)) = gap_info {
                 show_gap_cursor(container_el, gap_cursor_raf, side, block_start, block_end);
                 let _ = container_el.dyn_ref::<HtmlElement>()
                     .map(|el| el.style().set_property("caret-color", "transparent"));
+                // Keep kd_handled set — selectionchange must stay suppressed
+                // while the gap cursor is active, otherwise the browser's
+                // stale cursor position overwrites the gap position.
             } else {
                 hide_gap_cursor(gap_cursor_raf, editor_raf);
+                kd_handled_raf.set(false);
                 if sel.is_cursor() {
                     restore_cursor(container_el, head);
                 } else {
@@ -2372,12 +2372,14 @@ fn show_gap_cursor(
         }
     };
 
+
+
     let block_rect = block_el.get_bounding_client_rect();
 
-    // The gap cursor has `position: absolute` and resolves against its
-    // offset parent (wysiwyg-container, which has `position: relative`).
-    // Use the offset parent's rect so the calculation is correct even when
-    // a toolbar sits between wysiwyg-container and the scroll container.
+    // Make the gap cursor visible BEFORE querying offset_parent —
+    // browsers return null for offset_parent on display:none elements.
+    let _ = gap_el.style().set_property("display", "block");
+
     let origin_rect = gap_el
         .offset_parent()
         .map(|p| p.get_bounding_client_rect())
@@ -2389,8 +2391,6 @@ fn show_gap_cursor(
         GapSide::Before => block_rect.left() - origin_rect.left(),
         GapSide::After => block_rect.right() - origin_rect.left(),
     };
-
-    let _ = gap_el.style().set_property("display", "block");
     let _ = gap_el.style().set_property("top", &format!("{top}px"));
     let _ = gap_el.style().set_property("left", &format!("{left}px"));
     let _ = gap_el.style().set_property(
