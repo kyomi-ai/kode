@@ -98,7 +98,6 @@ pub fn TreeWysiwygEditor(
     let last_ext_version = std::cell::Cell::new(0u64);
 
     let editor_ref = NodeRef::<leptos::html::Div>::new();
-    let gap_cursor_ref = NodeRef::<leptos::html::Div>::new();
     let keydown_handled = std::rc::Rc::new(std::cell::Cell::new(false));
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
@@ -268,6 +267,9 @@ pub fn TreeWysiwygEditor(
             let new_segs = segments_memo.get();
             if let Some(container) = editor_ref.get_untracked() {
                 let container_el: &web_sys::Element = container.as_ref();
+                // Remove the gap cursor before patching so it doesn't
+                // shift child indices and corrupt the slot matching.
+                hide_gap_cursor(container_el);
                 let mut old = prev_segments_for_effect.borrow_mut();
                 patch_segments(
                     container_el,
@@ -290,7 +292,6 @@ pub fn TreeWysiwygEditor(
 
         let doc_raf = doc_for_sel.clone();
         let editor_raf = editor_ref;
-        let gap_cursor_raf = gap_cursor_ref;
         let kd_handled_raf = keydown_handled_effect.clone();
 
         let cb = Closure::once(move || {
@@ -306,14 +307,14 @@ pub fn TreeWysiwygEditor(
             let anchor = sel.anchor;
 
             if let Some((side, block_start, block_end)) = gap_info {
-                show_gap_cursor(container_el, gap_cursor_raf, side, block_start, block_end);
+                show_gap_cursor(container_el, side, block_start, block_end);
                 let _ = container_el.dyn_ref::<HtmlElement>()
                     .map(|el| el.style().set_property("caret-color", "transparent"));
                 // Keep kd_handled set — selectionchange must stay suppressed
                 // while the gap cursor is active, otherwise the browser's
                 // stale cursor position overwrites the gap position.
             } else {
-                hide_gap_cursor(gap_cursor_raf, editor_raf);
+                hide_gap_cursor(container_el);
                 kd_handled_raf.set(false);
                 if sel.is_cursor() {
                     restore_cursor(container_el, head);
@@ -1163,7 +1164,6 @@ pub fn TreeWysiwygEditor(
     {
         let doc_selchange = doc_state.clone();
         let editor_selchange = editor_ref;
-        let gap_cursor_selchange = gap_cursor_ref;
         let extensions_for_effectchange = Arc::clone(&extensions);
         let kd_handled_selchange = keydown_handled.clone();
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
@@ -1197,7 +1197,7 @@ pub fn TreeWysiwygEditor(
                     None
                 };
                 drop(ds);
-                show_gap_cursor(container_el, gap_cursor_selchange, side, block_start, block_end);
+                show_gap_cursor(container_el, side, block_start, block_end);
                 if let Some(states) = ext_states {
                     extension_active_state.set(states);
                 }
@@ -1205,7 +1205,7 @@ pub fn TreeWysiwygEditor(
                 return;
             }
 
-            hide_gap_cursor(gap_cursor_selchange, editor_selchange);
+            hide_gap_cursor(container_el);
             let fmt = ds.formatting_at_cursor();
 
             let ext_states = if !extensions_for_effectchange.is_empty() {
@@ -1444,7 +1444,6 @@ pub fn TreeWysiwygEditor(
 
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
-    let gap_cursor_md = gap_cursor_ref;
     let on_mousedown = move |ev: MouseEvent| {
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
@@ -1490,7 +1489,7 @@ pub fn TreeWysiwygEditor(
             drop(ds);
             if let Some(container) = editor_ref.get() {
                 let container_el: &web_sys::Element = container.as_ref();
-                show_gap_cursor(container_el, gap_cursor_md, side, bs, be);
+                show_gap_cursor(container_el, side, bs, be);
                 let _ = container.dyn_ref::<HtmlElement>().map(|el| {
                     let _ = el.style().set_property("caret-color", "transparent");
                     let _ = el.focus();
@@ -1531,10 +1530,6 @@ pub fn TreeWysiwygEditor(
                 on:mousedown=on_mousedown
                 on:compositionstart=on_composition_start
                 on:compositionend=on_composition_end
-            />
-            <div
-                node_ref=gap_cursor_ref
-                class="kode-gap-cursor"
             />
         </div>
     }
@@ -2347,18 +2342,20 @@ fn resolve_grid_group_positions(grid_wrapper: &web_sys::Element) -> Option<(usiz
     Some((group_start, group_end))
 }
 
-// ── Gap cursor rendering ──────────────────────────────���──────────────────
+// ── Gap cursor rendering ─────────────────────────────────────────────────
+//
+// The gap cursor is a thin element inserted into the document flow at the
+// gap position — between block elements. It scrolls naturally with the
+// content because it IS content, not a floating overlay.
 
-/// Show the gap cursor element positioned at the edge of an atomic block.
+/// Insert a gap cursor element into the document flow next to an atomic block.
 fn show_gap_cursor(
     container: &web_sys::Element,
-    gap_ref: NodeRef<leptos::html::Div>,
     side: GapSide,
     block_start: usize,
     block_end: usize,
 ) {
-    let Some(gap_el) = gap_ref.get() else { return };
-    let gap_el: &web_sys::HtmlElement = gap_el.as_ref();
+    hide_gap_cursor(container);
 
     let selector = format!(
         "[data-pos-start=\"{}\"][data-pos-end=\"{}\"]",
@@ -2366,47 +2363,69 @@ fn show_gap_cursor(
     );
     let block_el = match container.query_selector(&selector) {
         Ok(Some(el)) => el,
-        _ => {
-            let _ = gap_el.style().set_property("display", "none");
-            return;
-        }
+        _ => return,
     };
 
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(gc) = doc.create_element("div") else { return };
+    let _ = gc.set_attribute("class", "kode-gap-cursor");
+    let _ = gc.set_attribute("contenteditable", "false");
 
-
-    let block_rect = block_el.get_bounding_client_rect();
-
-    // Make the gap cursor visible BEFORE querying offset_parent —
-    // browsers return null for offset_parent on display:none elements.
-    let _ = gap_el.style().set_property("display", "block");
-
-    let origin_rect = gap_el
-        .offset_parent()
-        .map(|p| p.get_bounding_client_rect())
-        .unwrap_or_else(|| container.get_bounding_client_rect());
-
-    let top = block_rect.top() - origin_rect.top();
-
+    // The gap cursor is position:absolute inside the scroll container
+    // (position:relative). Use the block's offset position within the
+    // container so it scrolls naturally with the content.
+    let block_html: &web_sys::HtmlElement = block_el.unchecked_ref();
+    let top = block_html.offset_top() as f64;
+    let height = block_html.offset_height() as f64;
     let left = match side {
-        GapSide::Before => block_rect.left() - origin_rect.left(),
-        GapSide::After => block_rect.right() - origin_rect.left(),
+        GapSide::Before => block_html.offset_left() as f64,
+        GapSide::After => block_html.offset_left() as f64 + block_html.offset_width() as f64,
     };
-    let _ = gap_el.style().set_property("top", &format!("{top}px"));
-    let _ = gap_el.style().set_property("left", &format!("{left}px"));
-    let _ = gap_el.style().set_property(
-        "height",
-        &format!("{}px", block_rect.height()),
-    );
+    let gc_html: &web_sys::HtmlElement = gc.unchecked_ref();
+    let _ = gc_html.style().set_property("top", &format!("{top}px"));
+    let _ = gc_html.style().set_property("left", &format!("{left}px"));
+    let _ = gc_html.style().set_property("height", &format!("{height}px"));
+
+    // Walk up to find the direct child of the container (the block may be
+    // inside a grid wrapper).
+    let insert_ref = find_container_child(container, &block_el);
+    let insert_ref = insert_ref.as_ref().unwrap_or(&block_el);
+
+    match side {
+        GapSide::Before => {
+            let _ = container.insert_before(&gc, Some(insert_ref));
+        }
+        GapSide::After => {
+            let _ = container.insert_before(&gc, insert_ref.next_sibling().as_ref());
+        }
+    }
+
+    let _ = container.dyn_ref::<HtmlElement>()
+        .map(|el| el.style().set_property("caret-color", "transparent"));
 }
 
-/// Hide the gap cursor element.
-fn hide_gap_cursor(gap_ref: NodeRef<leptos::html::Div>, editor_ref: NodeRef<leptos::html::Div>) {
-    if let Some(gap_el) = gap_ref.get() {
-        let gap_el: &web_sys::HtmlElement = gap_el.as_ref();
-        let _ = gap_el.style().set_property("display", "none");
+/// Remove any gap cursor element from the container.
+fn hide_gap_cursor(container: &web_sys::Element) {
+    if let Ok(Some(gc)) = container.query_selector(".kode-gap-cursor") {
+        gc.remove();
     }
-    if let Some(editor) = editor_ref.get() {
-        let _ = editor.dyn_ref::<HtmlElement>()
-            .map(|el| el.style().remove_property("caret-color"));
+    let _ = container.dyn_ref::<HtmlElement>()
+        .map(|el| el.style().remove_property("caret-color"));
+}
+
+/// Walk up from an element to find the direct child of `container`.
+fn find_container_child(
+    container: &web_sys::Element,
+    el: &web_sys::Element,
+) -> Option<web_sys::Element> {
+    let mut current = Some(el.clone());
+    while let Some(ref node) = current {
+        if let Some(parent) = node.parent_element() {
+            if &parent == container {
+                return current;
+            }
+        }
+        current = node.parent_element();
     }
+    None
 }

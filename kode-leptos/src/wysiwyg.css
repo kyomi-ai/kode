@@ -307,7 +307,6 @@ pre.wysiwyg-code-block code {
 /* ── Gap cursor (caret between blocks next to atomic elements) ────── */
 
 .kode-gap-cursor {
-    display: none;
     position: absolute;
     width: 2px;
     pointer-events: none;
