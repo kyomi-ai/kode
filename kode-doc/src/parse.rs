@@ -564,6 +564,13 @@ fn parse_inline_recursive(chars: &[char], marks: &[Mark], out: &mut Vec<Node>) {
                 i += 1;
             }
 
+            // HTML <br> tag → HardBreak (used in table cells where `  \n` is not viable)
+            '<' if matches_br_tag(chars, i) => {
+                flush_text(&mut buf, marks, out);
+                out.push(Node::leaf(NodeType::HardBreak));
+                i += skip_br_tag(chars, i);
+            }
+
             // Image: ![alt](src "title")
             '!' if i + 1 < chars.len() && chars[i + 1] == '[' => {
                 if let Some((alt, src, title, end)) = parse_image_or_link(chars, i + 1) {
@@ -817,6 +824,22 @@ fn is_punctuation(c: char) -> bool {
 }
 
 /// Check if position `i` starts a hard line break (2+ spaces followed by \n).
+/// Check if chars at position `i` start with `<br>`, `<br/>`, or `<br />` (case-insensitive).
+fn matches_br_tag(chars: &[char], i: usize) -> bool {
+    skip_br_tag(chars, i) > 0
+}
+
+/// Return the number of characters consumed by a `<br>` variant at position `i`, or 0 if none.
+fn skip_br_tag(chars: &[char], i: usize) -> usize {
+    let remaining: String = chars[i..].iter().collect();
+    for pat in ["<br>", "<br/>", "<br />", "<BR>", "<BR/>", "<BR />"] {
+        if remaining.starts_with(pat) {
+            return pat.len();
+        }
+    }
+    0
+}
+
 fn has_hard_break_at(chars: &[char], i: usize) -> bool {
     // Need at least 2 spaces then a newline
     if i + 2 >= chars.len() {

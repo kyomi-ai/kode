@@ -460,11 +460,31 @@ impl DocState {
         let from = self.adjust_into_textblock(raw_from);
         let to = self.adjust_into_textblock(raw_to);
 
-        // Inside a code block or table cell, Enter inserts a newline
-        // character instead of splitting the block.
+        // Inside a code block, Enter inserts a newline character.
         let resolved_from = self.doc.resolve(from);
-        if matches!(resolved_from.parent().node_type, NodeType::CodeBlock | NodeType::TableCell) {
+        if resolved_from.parent().node_type == NodeType::CodeBlock {
             self.insert_text_inner("\n");
+            return;
+        }
+
+        // Inside a table cell, Enter inserts a HardBreak (<br>) since
+        // table cells use normal whitespace collapsing where \n is invisible.
+        // No push_undo/redo_stack.clear here — the caller (split_block) handles that.
+        if resolved_from.parent().node_type == NodeType::TableCell {
+            if from != to {
+                let mut tr = Transform::new(self.doc.clone());
+                if tr.delete(from, to).is_ok() {
+                    self.doc = tr.doc;
+                } else {
+                    return;
+                }
+            }
+            let br = Node::leaf(NodeType::HardBreak);
+            let mut tr = Transform::new(self.doc.clone());
+            if tr.insert(from, Fragment::from_node(br)).is_ok() {
+                self.doc = tr.doc;
+                self.selection = Selection::cursor(from + 1);
+            }
             return;
         }
 

@@ -283,8 +283,21 @@ fn serialize_table_row(row: &Node, out: &mut String) {
     out.push('|');
     for cell in row.content.iter() {
         out.push(' ');
-        serialize_inline_children(cell, out);
+        serialize_table_cell_inline(cell, out);
         out.push_str(" |");
+    }
+}
+
+/// Serialize inline children of a table cell.
+///
+/// HardBreak emits `<br>` instead of `  \n` because a literal newline
+/// would break the pipe-table row syntax.
+fn serialize_table_cell_inline(node: &Node, out: &mut String) {
+    for child in node.content.iter() {
+        match child.node_type {
+            NodeType::HardBreak => out.push_str("<br>"),
+            _ => serialize_node(child, out, &BlockContext::Top),
+        }
     }
 }
 

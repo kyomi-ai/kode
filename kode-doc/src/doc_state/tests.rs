@@ -3189,17 +3189,18 @@ mod table_editing_tests {
             "table should still have 2 children (header + row)"
         );
 
-        // The cell content should now contain a newline between "he" and "llo".
+        // The cell should now contain "he", a HardBreak, and "llo".
         let row = table.child(1);
         let cell = row.child(0);
+        let has_hard_break = cell.content.iter().any(|c| c.node_type == crate::node_type::NodeType::HardBreak);
+        assert!(
+            has_hard_break,
+            "cell should contain a HardBreak after split_block"
+        );
         let cell_text = cell.text_content();
         assert!(
-            cell_text.contains('\n'),
-            "cell should contain a newline after split_block, got: {cell_text:?}"
-        );
-        assert!(
             cell_text.contains("he") && cell_text.contains("llo"),
-            "cell should contain 'he' and 'llo' around the newline, got: {cell_text:?}"
+            "cell should contain 'he' and 'llo' around the break, got: {cell_text:?}"
         );
 
         // Verify we didn't accidentally produce a second table or extra rows.
@@ -3208,6 +3209,16 @@ mod table_editing_tests {
             1,
             "doc should still have exactly 1 child (the table)"
         );
+
+        // Round-trip: serialize → re-parse → verify HardBreak survives
+        let md = crate::serialize_markdown(state.doc());
+        assert!(md.contains("<br>"), "serialized markdown should contain <br>");
+        let reparsed = DocState::from_markdown(&md);
+        let rt_table = reparsed.doc().child(0);
+        let rt_row = rt_table.child(1);
+        let rt_cell = rt_row.child(0);
+        let rt_has_br = rt_cell.content.iter().any(|c| c.node_type == crate::node_type::NodeType::HardBreak);
+        assert!(rt_has_br, "HardBreak should survive round-trip through serialization");
     }
 
     #[test]
