@@ -126,6 +126,14 @@ impl DocState {
 
             if let Some(wd) = wrapper_depth {
                 let wrapper_node = resolved.node(wd);
+
+                // Inside a table structure: backspace at cell start is a no-op.
+                // (Table itself is unreachable here — the walker always lands on
+                // TableRow/TableHeader first — but included for defensive completeness.)
+                if matches!(wrapper_node.node_type, NodeType::TableRow | NodeType::TableHeader | NodeType::Table) {
+                    return;
+                }
+
                 let wrapper_start = resolved.before(wd);
                 let wrapper_end = resolved.after(wd);
                 let is_empty = wrapper_node.text_content().is_empty();
@@ -253,7 +261,7 @@ impl DocState {
             // and any other special textblock type. Standard editor behavior:
             // backspace at start of a heading/code block converts to paragraph.
             let parent_type = resolved.parent().node_type;
-            if parent_type != NodeType::Paragraph {
+            if parent_type != NodeType::Paragraph && parent_type != NodeType::TableCell {
                 self.push_undo();
                 let block_start = resolved.before(resolved.depth);
                 let block_end = resolved.after(resolved.depth);
@@ -452,10 +460,10 @@ impl DocState {
         let from = self.adjust_into_textblock(raw_from);
         let to = self.adjust_into_textblock(raw_to);
 
-        // Inside a code block, Enter inserts a newline character instead
-        // of splitting the block.
+        // Inside a code block or table cell, Enter inserts a newline
+        // character instead of splitting the block.
         let resolved_from = self.doc.resolve(from);
-        if resolved_from.parent().node_type == NodeType::CodeBlock {
+        if matches!(resolved_from.parent().node_type, NodeType::CodeBlock | NodeType::TableCell) {
             self.insert_text_inner("\n");
             return;
         }
@@ -535,6 +543,11 @@ impl DocState {
             return false;
         };
 
+        // Table cells must not join across cell boundaries.
+        if resolved.parent().node_type == NodeType::TableCell {
+            return false;
+        }
+
         // The position before the current textblock's opening token.
         let before_pos = resolved.before(tb_depth);
         if before_pos == 0 {
@@ -610,6 +623,11 @@ impl DocState {
         } else {
             return false;
         };
+
+        // Table cells must not join across cell boundaries.
+        if resolved.parent().node_type == NodeType::TableCell {
+            return false;
+        }
 
         // The position after the current textblock's closing token.
         let after_pos = resolved.after(tb_depth);
