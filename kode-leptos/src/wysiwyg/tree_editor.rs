@@ -1639,36 +1639,42 @@ fn count_chars_to_point(
         return 0;
     };
 
-    // Use TreeWalker to iterate text nodes in document order.
+    // Walk ALL nodes (text + elements) to correctly account for <br> elements
+    // which occupy 1 document position but contain 0 text characters.
     let Ok(walker) = document.create_tree_walker_with_what_to_show(
         root_el,
-        0x4, // NodeFilter.SHOW_TEXT
+        0x5, // SHOW_ELEMENT (0x1) | SHOW_TEXT (0x4)
     ) else {
         return 0;
     };
 
     let mut count = 0usize;
 
-    // Advance to the first text node (currentNode starts at the root element,
-    // which is not a text node despite the SHOW_TEXT filter).
     if walker.next_node().ok().flatten().is_none() {
-        // No text nodes at all — check element-level offset below.
+        // No child nodes at all.
     } else {
         loop {
-            let Some(node) = walker.current_node().dyn_ref::<web_sys::Node>().cloned() else {
-                break;
-            };
+            let node = walker.current_node();
 
             if node == *target_node {
-                if let Some(text) = node.text_content() {
-                    let char_offset = utf16_offset_to_char_count(&text, target_offset as usize);
-                    count += char_offset;
+                // For text nodes, add the char offset within the node.
+                if node.node_type() == web_sys::Node::TEXT_NODE {
+                    if let Some(text) = node.text_content() {
+                        let char_offset = utf16_offset_to_char_count(&text, target_offset as usize);
+                        count += char_offset;
+                    }
                 }
                 return count;
             }
 
-            if let Some(text) = node.text_content() {
-                count += text.chars().count();
+            if node.node_type() == web_sys::Node::TEXT_NODE {
+                if let Some(text) = node.text_content() {
+                    count += text.chars().count();
+                }
+            } else if let Some(el) = node.dyn_ref::<web_sys::Element>() {
+                if el.tag_name() == "BR" && !el.has_attribute("data-guard") {
+                    count += 1;
+                }
             }
 
             if walker.next_node().ok().flatten().is_none() {
@@ -1687,12 +1693,23 @@ fn count_chars_to_point(
 }
 
 /// When Selection points to an element node with offset = child index,
-/// count characters from the start of the element to the nth child.
+/// count document positions from the start of the element to the nth child.
+/// Text nodes contribute their character count; `<br>` elements contribute 1.
 fn count_chars_up_to_child_index(el: &web_sys::Element, child_index: usize) -> usize {
     let children = el.child_nodes();
     let mut count = 0;
     for i in 0..child_index.min(children.length() as usize) {
         if let Some(child) = children.get(i as u32) {
+            if child.node_type() == web_sys::Node::ELEMENT_NODE {
+                if let Some(child_el) = child.dyn_ref::<web_sys::Element>() {
+                    if child_el.tag_name() == "BR" {
+                        if !child_el.has_attribute("data-guard") {
+                            count += 1;
+                        }
+                        continue;
+                    }
+                }
+            }
             if let Some(text) = child.text_content() {
                 count += text.chars().count();
             }
@@ -1765,35 +1782,58 @@ fn find_text_point(container: &web_sys::Element, doc_pos: usize) -> Option<(web_
 
     let document = web_sys::window().and_then(|w| w.document())?;
 
-    // Walk text nodes inside the positioned element.
+    // Walk ALL child nodes (text + elements) to account for <br> elements
+    // which occupy 1 document position but contain 0 text characters.
     let Ok(walker) = document.create_tree_walker_with_what_to_show(
         &target_el,
-        0x4, // NodeFilter.SHOW_TEXT
+        0x5, // SHOW_ELEMENT (0x1) | SHOW_TEXT (0x4)
     ) else {
         return None;
     };
 
     let mut chars_remaining = target_char_offset;
 
-    // Advance past the root element to the first text node.
-    // (TreeWalker.currentNode starts at the root element regardless of the
-    // SHOW_TEXT filter — only navigation methods like nextNode() respect it.)
     if walker.next_node().ok().flatten().is_none() {
-        // No text nodes (empty element) — position cursor inside it.
         return Some((target_el.unchecked_into::<web_sys::Node>(), 0));
     }
 
     loop {
         let node = walker.current_node();
 
-        if let Some(text) = node.text_content() {
-            let text_char_count = text.chars().count();
-            if chars_remaining <= text_char_count {
-                // Found the right text node. Convert char offset to UTF-16 offset.
-                let utf16_offset = char_count_to_utf16_offset(&text, chars_remaining);
-                return Some((node, utf16_offset));
+        if node.node_type() == web_sys::Node::TEXT_NODE {
+            if let Some(text) = node.text_content() {
+                let text_char_count = text.chars().count();
+                if chars_remaining <= text_char_count {
+                    let utf16_offset = char_count_to_utf16_offset(&text, chars_remaining);
+                    return Some((node, utf16_offset));
+                }
+                chars_remaining -= text_char_count;
             }
-            chars_remaining -= text_char_count;
+        } else if let Some(el) = node.dyn_ref::<web_sys::Element>() {
+            if el.tag_name() == "BR" && !el.has_attribute("data-guard") {
+                if chars_remaining == 0 {
+                    // Cursor is before this <br>.
+                    if let Some(parent) = el.parent_node() {
+                        let children = parent.child_nodes();
+                        for i in 0..children.length() {
+                            if children.get(i) == Some(node.clone()) {
+                                return Some((parent, i as usize));
+                            }
+                        }
+                    }
+                } else if chars_remaining == 1 {
+                    // Cursor is right after this <br>.
+                    if let Some(parent) = el.parent_node() {
+                        let children = parent.child_nodes();
+                        for i in 0..children.length() {
+                            if children.get(i) == Some(node.clone()) {
+                                return Some((parent, (i + 1) as usize));
+                            }
+                        }
+                    }
+                }
+                chars_remaining = chars_remaining.saturating_sub(1);
+            }
         }
 
         if walker.next_node().ok().flatten().is_none() {

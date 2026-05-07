@@ -493,6 +493,7 @@ fn render_table_cells(row: &Node, content_start: usize, tag: &str) -> Vec<AnyVie
 /// parsed. No need to re-parse markdown syntax.
 fn render_inline_content(content: &Fragment) -> String {
     let mut html = String::new();
+    let last_is_hard_break = content.iter().last().is_some_and(|n| n.node_type == NodeType::HardBreak);
 
     for child in content.iter() {
         match child.node_type {
@@ -526,6 +527,13 @@ fn render_inline_content(content: &Fragment) -> String {
                 html.push_str(&html_escape(&child.text_content()));
             }
         }
+    }
+
+    // A trailing <br> is invisible in contenteditable — browsers can't place
+    // a cursor on the empty line after it. Append a guardian <br> so the new
+    // line is visible and the cursor can land there.
+    if last_is_hard_break {
+        html.push_str("<br data-guard>");
     }
 
     html
