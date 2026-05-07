@@ -6,6 +6,34 @@ All notable changes to this project are documented here. Format based on
 
 ## [Unreleased]
 
+## [0.2.8] — 2026-05-07
+
+### Added
+
+#### `kode-doc`
+
+- **Markdown table editing support.** Tables parsed from markdown are now fully
+  interactive in the WYSIWYG editor:
+  - Enter inserts a visible line break (`<br>`) within cells
+  - Backspace/Delete at cell boundaries are no-ops (preserves table structure)
+  - Tab/Shift+Tab navigates between cells, wrapping across rows
+  - Tab at the last cell auto-creates a new row
+  - Backspace in an empty row deletes it
+  - Column alignment (`:---:`, `---:`) preserved on roundtrip
+  - `insert_table()` — inserts a 3×3 empty table at cursor
+  - `insert_row_below()`, `insert_row_above()`, `delete_row()`
+  - `insert_column_left()`, `insert_column_right()`, `delete_column()`
+  - `move_to_next_cell()`, `move_to_prev_cell()`
+
+#### `kode-leptos`
+
+- **Table toolbar button** (`BuiltinButton::Table`) — inserts a new table
+- **Ctrl+Shift+Right/Left** — insert column right/left of current cell
+- **Cursor positioning around `<br>` elements** — position mapping now accounts
+  for `<br>` elements in contenteditable, with guardian `<br>` for trailing
+  line breaks
+- `<br>` tag recognition in inline parser for table cell roundtrip fidelity
+
 ## [0.2.5] — 2026-05-02
 
 ### Fixed
