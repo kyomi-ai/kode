@@ -127,10 +127,11 @@ impl DocState {
             if let Some(wd) = wrapper_depth {
                 let wrapper_node = resolved.node(wd);
 
-                // Inside a table structure: backspace at cell start is a no-op.
-                // (Table itself is unreachable here — the walker always lands on
-                // TableRow/TableHeader first — but included for defensive completeness.)
+                // Inside a table structure: backspace at cell start deletes
+                // the row if every cell is empty (and it's not the header or
+                // only data row). Otherwise it's a no-op.
                 if matches!(wrapper_node.node_type, NodeType::TableRow | NodeType::TableHeader | NodeType::Table) {
+                    self.delete_row_if_empty();
                     return;
                 }
 
@@ -956,6 +957,25 @@ impl DocState {
             self.selection = Selection::cursor(insert_pos + 2);
         }
         self.redo_stack.clear();
+    }
+
+    /// Delete the current row if every cell in it is empty.
+    ///
+    /// Called by backspace at cell start inside a table. Delegates to
+    /// `delete_row()` which already guards against deleting the header
+    /// or the only data row.
+    fn delete_row_if_empty(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+        let resolved = self.doc.resolve(self.selection.head);
+        let row = resolved.node(ctx.row_depth);
+        let all_empty = (0..row.child_count())
+            .all(|i| row.child(i).text_content().is_empty());
+        if all_empty {
+            self.delete_row();
+        }
     }
 
     /// Delete the current row.
