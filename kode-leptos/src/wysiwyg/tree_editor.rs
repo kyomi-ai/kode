@@ -1069,6 +1069,34 @@ pub fn TreeWysiwygEditor(
                 }
                 true
             }
+            "ArrowRight" if ctrl && shift => {
+                let in_table = {
+                    let resolved = ds.doc().resolve(ds.selection().head);
+                    (0..=resolved.depth).rev().any(|d| {
+                        resolved.node(d).node_type == kode_doc::NodeType::TableCell
+                    })
+                };
+                if in_table {
+                    ds.insert_column_right();
+                    true
+                } else {
+                    false
+                }
+            }
+            "ArrowLeft" if ctrl && shift => {
+                let in_table = {
+                    let resolved = ds.doc().resolve(ds.selection().head);
+                    (0..=resolved.depth).rev().any(|d| {
+                        resolved.node(d).node_type == kode_doc::NodeType::TableCell
+                    })
+                };
+                if in_table {
+                    ds.insert_column_left();
+                    true
+                } else {
+                    false
+                }
+            }
             "Tab" if !ctrl => {
                 let in_table = {
                     let resolved = ds.doc().resolve(ds.selection().head);
