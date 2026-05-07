@@ -810,3 +810,321 @@ impl DocState {
         self.redo_stack.clear();
     }
 }
+
+// ── Table row/column operations ──────────────────────────────────────────
+
+/// Context about the cursor's position within a table structure.
+struct TableContext {
+    /// Depth of the Table node in the resolved path.
+    table_depth: usize,
+    /// Depth of the TableRow or TableHeader node.
+    row_depth: usize,
+    /// Which row in the table (0-based).
+    row_index: usize,
+    /// Which cell in the row (0-based).
+    col_index: usize,
+}
+
+impl DocState {
+    /// Find the table context for the current cursor position.
+    ///
+    /// Walks ancestors from innermost to outermost looking for a `TableCell`.
+    /// Returns `None` if the cursor is not inside a table cell.
+    fn find_table_context(&self) -> Option<TableContext> {
+        let resolved = self.doc.resolve(self.selection.head);
+
+        // Walk ancestors to find a TableCell depth.
+        let cell_depth = (0..=resolved.depth)
+            .rev()
+            .find(|&d| resolved.node(d).node_type == NodeType::TableCell)?;
+
+        // TableCell must be at depth >= 2 (Table > Row > Cell).
+        if cell_depth < 2 {
+            return None;
+        }
+
+        let row_depth = cell_depth - 1;
+        let table_depth = cell_depth - 2;
+
+        // Verify the ancestor types are correct.
+        let row_type = resolved.node(row_depth).node_type;
+        if !matches!(row_type, NodeType::TableRow | NodeType::TableHeader) {
+            return None;
+        }
+        if resolved.node(table_depth).node_type != NodeType::Table {
+            return None;
+        }
+
+        let col_index = resolved.index(row_depth);
+        let row_index = resolved.index(table_depth);
+
+        Some(TableContext {
+            table_depth,
+            row_depth,
+            row_index,
+            col_index,
+        })
+    }
+
+    /// Insert a new empty row below the current row.
+    ///
+    /// No-op if the cursor is not inside a table cell.
+    pub fn insert_row_below(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let row = resolved.node(ctx.row_depth);
+        let col_count = row.child_count();
+
+        // Build a new TableRow with empty cells.
+        let cells: Vec<Node> = (0..col_count)
+            .map(|_| Node::branch(NodeType::TableCell, Fragment::empty()))
+            .collect();
+        let new_row = Node::branch(NodeType::TableRow, Fragment::from_vec(cells));
+
+        // Insert position: right after the current row's closing token.
+        let insert_pos = resolved.after(ctx.row_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.insert(insert_pos, Fragment::from_node(new_row)).is_ok() {
+            self.doc = tr.doc;
+            // Cursor into the first cell of the new row: +1 row open + 1 cell open.
+            self.selection = Selection::cursor(insert_pos + 2);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Insert a new empty row above the current row.
+    ///
+    /// If the current row is the header row, inserts below it instead (cannot
+    /// insert above the header). No-op if the cursor is not inside a table cell.
+    pub fn insert_row_above(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let row = resolved.node(ctx.row_depth);
+
+        // Cannot insert above the header row — insert below instead.
+        if row.node_type == NodeType::TableHeader {
+            self.insert_row_below();
+            return;
+        }
+
+        let col_count = row.child_count();
+
+        // Build a new TableRow with empty cells.
+        let cells: Vec<Node> = (0..col_count)
+            .map(|_| Node::branch(NodeType::TableCell, Fragment::empty()))
+            .collect();
+        let new_row = Node::branch(NodeType::TableRow, Fragment::from_vec(cells));
+
+        // Insert position: before the current row's opening token.
+        let insert_pos = resolved.before(ctx.row_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.insert(insert_pos, Fragment::from_node(new_row)).is_ok() {
+            self.doc = tr.doc;
+            // Cursor into the first cell of the new row: +1 row open + 1 cell open.
+            self.selection = Selection::cursor(insert_pos + 2);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Delete the current row.
+    ///
+    /// No-op if the cursor is not inside a table, if the current row is the
+    /// header row (index 0), or if there is only one data row remaining.
+    pub fn delete_row(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let row = resolved.node(ctx.row_depth);
+
+        // Don't delete the header row.
+        if row.node_type == NodeType::TableHeader {
+            return;
+        }
+        let table = resolved.node(ctx.table_depth);
+
+        // Don't delete if it's the only data row (header + 1 row = child_count 2).
+        if table.child_count() <= 2 {
+            return;
+        }
+
+        let delete_from = resolved.before(ctx.row_depth);
+        let delete_to = resolved.after(ctx.row_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(delete_from, delete_to).is_ok() {
+            self.doc = tr.doc;
+            let target = delete_from.min(self.doc.content.size());
+            self.selection = Selection::cursor(self.adjust_into_textblock(target));
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Insert a new column to the right of the current column.
+    ///
+    /// Rebuilds the entire table with an additional cell in every row at
+    /// position `col_index + 1`. No-op if the cursor is not inside a table.
+    pub fn insert_column_right(&mut self) {
+        self.insert_column_at_offset(1);
+    }
+
+    /// Insert a new column to the left of the current column.
+    ///
+    /// Rebuilds the entire table with an additional cell in every row at
+    /// position `col_index`. No-op if the cursor is not inside a table.
+    pub fn insert_column_left(&mut self) {
+        self.insert_column_at_offset(0);
+    }
+
+    /// Shared implementation for insert_column_left and insert_column_right.
+    ///
+    /// `offset` is 0 for left (insert at col_index) or 1 for right (insert
+    /// at col_index + 1).
+    fn insert_column_at_offset(&mut self, offset: usize) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let table = resolved.node(ctx.table_depth);
+        let insert_col = ctx.col_index + offset;
+
+        // Rebuild the table with the new column.
+        let mut new_rows = Vec::new();
+        for row_idx in 0..table.child_count() {
+            let row = table.child(row_idx);
+            let mut new_cells: Vec<Node> = Vec::new();
+
+            for cell_idx in 0..row.child_count() {
+                if cell_idx == insert_col {
+                    new_cells.push(Node::branch(NodeType::TableCell, Fragment::empty()));
+                }
+                new_cells.push(row.child(cell_idx).clone());
+            }
+            // If inserting after the last cell.
+            if insert_col >= row.child_count() {
+                new_cells.push(Node::branch(NodeType::TableCell, Fragment::empty()));
+            }
+
+            new_rows.push(Node::branch(row.node_type, Fragment::from_vec(new_cells)));
+        }
+
+        let new_table = Node::branch(NodeType::Table, Fragment::from_vec(new_rows));
+        let table_start = resolved.before(ctx.table_depth);
+        let table_end = resolved.after(ctx.table_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr
+            .replace(table_start, table_end, Slice::new(Fragment::from_node(new_table), 0, 0))
+            .is_ok()
+        {
+            self.doc = tr.doc;
+
+            // Place cursor in the new cell of the current row.
+            // Walk the rebuilt table to find the absolute position of the new cell.
+            let new_resolved = self.doc.resolve(table_start + 1);
+            let new_table_node = new_resolved.node(ctx.table_depth);
+            let mut row_pos = table_start + 1; // table content start
+            for r in 0..ctx.row_index {
+                row_pos += new_table_node.child(r).node_size();
+            }
+            // row_pos is at the row's opening token.
+            let current_row = new_table_node.child(ctx.row_index);
+            let mut cell_pos = row_pos + 1; // row content start
+            for c in 0..insert_col {
+                cell_pos += current_row.child(c).node_size();
+            }
+            // cell_pos is at the new cell's opening token. +1 for content start.
+            self.selection = Selection::cursor(cell_pos + 1);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Delete the current column from the table.
+    ///
+    /// Rebuilds the entire table without the cell at `col_index` in each row.
+    /// No-op if the cursor is not inside a table or if any row has only one cell.
+    pub fn delete_column(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let table = resolved.node(ctx.table_depth);
+
+        // Don't delete if any row has only one column.
+        for row_idx in 0..table.child_count() {
+            if table.child(row_idx).child_count() <= 1 {
+                return;
+            }
+        }
+
+        // Rebuild the table without the cell at col_index.
+        let mut new_rows = Vec::new();
+        for row_idx in 0..table.child_count() {
+            let row = table.child(row_idx);
+            let mut new_cells: Vec<Node> = Vec::new();
+            for cell_idx in 0..row.child_count() {
+                if cell_idx != ctx.col_index {
+                    new_cells.push(row.child(cell_idx).clone());
+                }
+            }
+            new_rows.push(Node::branch(row.node_type, Fragment::from_vec(new_cells)));
+        }
+
+        let new_col_count = new_rows.first().map_or(0, |r| r.child_count());
+        let clamped_col = ctx.col_index.min(new_col_count.saturating_sub(1));
+
+        let new_table = Node::branch(NodeType::Table, Fragment::from_vec(new_rows));
+        let table_start = resolved.before(ctx.table_depth);
+        let table_end = resolved.after(ctx.table_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr
+            .replace(table_start, table_end, Slice::new(Fragment::from_node(new_table), 0, 0))
+            .is_ok()
+        {
+            self.doc = tr.doc;
+            // Walk the rebuilt table to find the target cell.
+            let rp = self.doc.resolve(table_start + 1);
+            let rebuilt_table = rp.node(ctx.table_depth);
+            let mut cursor_pos = table_start + 1; // table content start
+            for ri in 0..rebuilt_table.child_count() {
+                if ri == ctx.row_index {
+                    let row = rebuilt_table.child(ri);
+                    cursor_pos += 1; // row opening token
+                    for ci in 0..row.child_count() {
+                        if ci == clamped_col {
+                            cursor_pos += 1; // cell opening token
+                            break;
+                        }
+                        cursor_pos += row.child(ci).node_size();
+                    }
+                    break;
+                }
+                cursor_pos += rebuilt_table.child(ri).node_size();
+            }
+            self.selection = Selection::cursor(cursor_pos.min(self.doc.content.size()));
+        }
+        self.redo_stack.clear();
+    }
+}
