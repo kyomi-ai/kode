@@ -256,12 +256,18 @@ fn serialize_table(node: &Node, out: &mut String) {
             NodeType::TableHeader => {
                 // Header row: | col1 | col2 |
                 serialize_table_row(child, out);
-                // Delimiter row: | --- | --- |
+                // Delimiter row: | --- | :---: | ---: |
+                // Alignment markers are read from each cell's "align" attr.
                 out.push('\n');
-                let cell_count = child.content.children().len();
+                let header_cells = child.content.children();
                 out.push('|');
-                for _ in 0..cell_count {
-                    out.push_str(" --- |");
+                for cell in header_cells {
+                    let align = get_attr(&cell.attrs, "align");
+                    match align {
+                        Some(AttrValue::String(s)) if s == "center" => out.push_str(" :---: |"),
+                        Some(AttrValue::String(s)) if s == "right" => out.push_str(" ---: |"),
+                        _ => out.push_str(" --- |"),
+                    }
                 }
             }
             NodeType::TableRow => {

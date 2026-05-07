@@ -60,6 +60,7 @@ pub enum BuiltinButton {
     Link,
     CodeBlock,
     HorizontalRule,
+    Table,
 }
 
 impl BuiltinButton {
@@ -79,6 +80,7 @@ impl BuiltinButton {
             Self::Link => "\u{1F517}",
             Self::CodeBlock => "```",
             Self::HorizontalRule => "\u{2015}",
+            Self::Table => "\u{25A6}",
         }
     }
 
@@ -98,6 +100,7 @@ impl BuiltinButton {
             Self::Link => "Insert Link",
             Self::CodeBlock => "Code Block",
             Self::HorizontalRule => "Horizontal Rule",
+            Self::Table => "Insert Table",
         }
     }
 
@@ -115,7 +118,7 @@ impl BuiltinButton {
             Self::BulletList => fmt.bullet_list,
             Self::OrderedList => fmt.ordered_list,
             Self::Blockquote => fmt.blockquote,
-            Self::Link | Self::CodeBlock | Self::HorizontalRule => false,
+            Self::Link | Self::CodeBlock | Self::HorizontalRule | Self::Table => false,
         }
     }
 }
@@ -175,6 +178,7 @@ pub(crate) fn dispatch_builtin_action(ds: &mut kode_doc::DocState, btn: BuiltinB
         BuiltinButton::Link => ds.insert_link("https://"),
         BuiltinButton::CodeBlock => ds.set_block_type(NodeType::CodeBlock, code_block_attrs("")),
         BuiltinButton::HorizontalRule => ds.insert_horizontal_rule(),
+        BuiltinButton::Table => ds.insert_table(),
     }
 }
 
@@ -197,6 +201,7 @@ pub fn default_toolbar_items() -> Vec<ToolbarItem> {
         ToolbarItem::Builtin(BuiltinButton::Link),
         ToolbarItem::Builtin(BuiltinButton::CodeBlock),
         ToolbarItem::Builtin(BuiltinButton::HorizontalRule),
+        ToolbarItem::Builtin(BuiltinButton::Table),
     ]
 }
 

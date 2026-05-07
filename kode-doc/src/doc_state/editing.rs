@@ -659,6 +659,118 @@ impl DocState {
         true
     }
 
+    /// Move the cursor to the next table cell (Tab in a table).
+    ///
+    /// Walks ancestors to find a `TableCell`, then moves to the next cell in
+    /// the row. If at the last cell in a row, jumps to the first cell of the
+    /// next row. Returns `false` if the cursor is not in a table cell or is
+    /// already at the last cell of the last row.
+    pub fn move_to_next_cell(&mut self) -> bool {
+        let resolved = self.doc.resolve(self.selection.head);
+
+        // Walk ancestors to find a TableCell depth.
+        let cell_depth = match (0..=resolved.depth)
+            .rev()
+            .find(|&d| resolved.node(d).node_type == NodeType::TableCell)
+        {
+            Some(d) => d,
+            None => return false,
+        };
+
+        let row_depth = cell_depth - 1;
+        let table_depth = cell_depth - 2;
+
+        let cell_index = resolved.index(row_depth);
+        let row = resolved.node(row_depth);
+
+        if cell_index + 1 < row.child_count() {
+            // Move to the next cell in this row.
+            let mut pos = resolved.start(row_depth);
+            for i in 0..=cell_index {
+                pos += row.child(i).node_size();
+            }
+            // pos is now the opening token of the next cell; +1 for content start.
+            self.selection = Selection::cursor(pos + 1);
+            true
+        } else {
+            // Last cell in row — check for a next row.
+            let table = resolved.node(table_depth);
+            let row_index = resolved.index(table_depth);
+
+            if row_index + 1 < table.child_count() {
+                // Move to the first cell of the next row.
+                let mut pos = resolved.start(table_depth);
+                for i in 0..=row_index {
+                    pos += table.child(i).node_size();
+                }
+                // pos = next row's opening token; +1 row content, +1 cell opening.
+                self.selection = Selection::cursor(pos + 2);
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    /// Move the cursor to the previous table cell (Shift+Tab in a table).
+    ///
+    /// Walks ancestors to find a `TableCell`, then moves to the previous cell
+    /// in the row. If at the first cell in a row, jumps to the last cell of
+    /// the previous row. Returns `false` if the cursor is not in a table cell
+    /// or is already at the first cell of the first row.
+    pub fn move_to_prev_cell(&mut self) -> bool {
+        let resolved = self.doc.resolve(self.selection.head);
+
+        // Walk ancestors to find a TableCell depth.
+        let cell_depth = match (0..=resolved.depth)
+            .rev()
+            .find(|&d| resolved.node(d).node_type == NodeType::TableCell)
+        {
+            Some(d) => d,
+            None => return false,
+        };
+
+        let row_depth = cell_depth - 1;
+        let table_depth = cell_depth - 2;
+
+        let cell_index = resolved.index(row_depth);
+
+        if cell_index > 0 {
+            // Move to the previous cell in this row.
+            let mut pos = resolved.start(row_depth);
+            for i in 0..cell_index - 1 {
+                pos += resolved.node(row_depth).child(i).node_size();
+            }
+            // pos is now the opening token of the previous cell; +1 for content start.
+            self.selection = Selection::cursor(pos + 1);
+            true
+        } else {
+            // First cell in row — check for a previous row.
+            let table = resolved.node(table_depth);
+            let row_index = resolved.index(table_depth);
+
+            if row_index > 0 {
+                // Move to the last cell of the previous row.
+                let mut pos = resolved.start(table_depth);
+                for i in 0..row_index - 1 {
+                    pos += table.child(i).node_size();
+                }
+                // pos = previous row's opening token; +1 for row content start.
+                pos += 1;
+
+                let prev_row = table.child(row_index - 1);
+                for i in 0..prev_row.child_count() - 1 {
+                    pos += prev_row.child(i).node_size();
+                }
+                // pos = last cell's opening token; +1 for content start.
+                self.selection = Selection::cursor(pos + 1);
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     /// Move a block from `[block_start, block_end)` to `target_pos`.
     ///
     /// This is the engine behind drag-and-drop block reordering. The block

@@ -69,6 +69,13 @@ pub fn ordered_list_attrs(start: i64) -> Attrs {
     attrs
 }
 
+/// Returns attributes for a table cell with the given alignment (e.g. "center", "right").
+pub fn table_cell_attrs(align: &str) -> Attrs {
+    let mut attrs = SmallVec::new();
+    attrs.push(("align".to_string(), AttrValue::String(align.to_string())));
+    attrs
+}
+
 /// Looks up an attribute by key, returning a reference to its value if found.
 pub fn get_attr<'a>(attrs: &'a Attrs, key: &str) -> Option<&'a AttrValue> {
     attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v)

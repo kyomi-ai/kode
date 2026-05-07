@@ -276,6 +276,77 @@ impl DocState {
         }
     }
 
+    /// Insert a table (3 columns, 1 header + 2 body rows) at the cursor position.
+    ///
+    /// If the cursor is inside a textblock, splits the block first, then
+    /// inserts the table between the two halves.
+    pub fn insert_table(&mut self) {
+        let from = self.selection.from();
+        let to = self.selection.to();
+
+        // Delete selection if any.
+        let mut tr = Transform::new(self.doc.clone());
+        let pos = if from != to {
+            if tr.delete(from, to).is_err() {
+                return;
+            }
+            from
+        } else {
+            from
+        };
+
+        // Resolve position to check context.
+        let resolved = tr.doc.resolve(pos);
+
+        // Build the table structure: 3 columns, 1 header row + 2 body rows.
+        fn make_empty_cell() -> Node {
+            Node::branch(NodeType::TableCell, Fragment::empty())
+        }
+
+        fn make_row(cols: usize, row_type: NodeType) -> Node {
+            let cells: Vec<Node> = (0..cols).map(|_| make_empty_cell()).collect();
+            Node::branch(row_type, Fragment::from_vec(cells))
+        }
+
+        let header = make_row(3, NodeType::TableHeader);
+        let row1 = make_row(3, NodeType::TableRow);
+        let row2 = make_row(3, NodeType::TableRow);
+        let table = Node::branch(
+            NodeType::Table,
+            Fragment::from_vec(vec![header, row1, row2]),
+        );
+
+        if resolved.parent().node_type.is_textblock() {
+            // Inside a textblock: split the block, insert table between halves.
+            if tr.split(pos, 1).is_err() {
+                return;
+            }
+            // After split, the cursor is at the boundary between two blocks.
+            // The split point is at the closing token of the left block.
+            let rp = tr.doc.resolve(pos);
+            let insert_pos = rp.after(rp.depth);
+
+            if tr.insert(insert_pos, Fragment::from_node(table)).is_ok() {
+                self.push_undo();
+                self.doc = tr.doc;
+                // Place cursor inside the first header cell.
+                // insert_pos + 3: table open + header open + first cell open = 3 tokens deep.
+                self.selection = Selection::cursor(insert_pos + 3);
+                self.redo_stack.clear();
+            }
+        } else {
+            // Between blocks — just insert the table.
+            if tr.insert(pos, Fragment::from_node(table)).is_ok() {
+                self.push_undo();
+                self.doc = tr.doc;
+                // Place cursor inside the first header cell.
+                // pos + 3: table open + header open + first cell open = 3 tokens deep.
+                self.selection = Selection::cursor(pos + 3);
+                self.redo_stack.clear();
+            }
+        }
+    }
+
     /// Insert a horizontal rule at the cursor position.
     ///
     /// If the cursor is inside a textblock, splits the block first, then

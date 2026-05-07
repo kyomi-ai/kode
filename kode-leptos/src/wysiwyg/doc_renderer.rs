@@ -451,9 +451,16 @@ fn render_table_cells(row: &Node, content_start: usize, tag: &str) -> Vec<AnyVie
         let cell_content_end = cell_content_start + cell.content.size();
         let inline_html = render_inline_content(&cell.content);
 
+        let align_style = get_attr(&cell.attrs, "align")
+            .and_then(|v| match v {
+                AttrValue::String(s) if s != "left" => Some(format!("text-align: {s}")),
+                _ => None,
+            });
+
         let cell_view = if tag == "th" {
             view! {
                 <th class="wysiwyg-table-cell"
+                    style=align_style
                     data-pos-start=cell_content_start
                     data-pos-end=cell_content_end
                     inner_html=inline_html />
@@ -462,6 +469,7 @@ fn render_table_cells(row: &Node, content_start: usize, tag: &str) -> Vec<AnyVie
         } else {
             view! {
                 <td class="wysiwyg-table-cell"
+                    style=align_style
                     data-pos-start=cell_content_start
                     data-pos-end=cell_content_end
                     inner_html=inline_html />
@@ -1066,9 +1074,15 @@ fn table_cells_to_html(html: &mut String, row: &Node, content_start: usize, tag:
         let cell_content_start = pos + 1;
         let cell_content_end = cell_content_start + cell.content.size();
         let inline = render_inline_content(&cell.content);
+        let style = match get_attr(&cell.attrs, "align") {
+            Some(AttrValue::String(s)) if s == "center" => " style=\"text-align: center\"",
+            Some(AttrValue::String(s)) if s == "right" => " style=\"text-align: right\"",
+            _ => "",
+        };
         html.push_str(&format!(
-            "<{tag} class=\"wysiwyg-table-cell\" data-pos-start=\"{cs}\" data-pos-end=\"{ce}\">{inline}</{tag}>",
+            "<{tag} class=\"wysiwyg-table-cell\"{style} data-pos-start=\"{cs}\" data-pos-end=\"{ce}\">{inline}</{tag}>",
             tag = tag,
+            style = style,
             cs = cell_content_start,
             ce = cell_content_end,
             inline = inline,

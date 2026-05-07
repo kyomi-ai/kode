@@ -9,6 +9,7 @@ use arborium_tree_sitter::{Language, Parser};
 
 use crate::attrs::{
     code_block_attrs, empty_attrs, heading_attrs, image_attrs, link_attrs, ordered_list_attrs,
+    table_cell_attrs,
 };
 use crate::fragment::Fragment;
 use crate::mark::{Mark, MarkType};
@@ -278,35 +279,67 @@ fn convert_list_items(list_node: &arborium_tree_sitter::Node, source: &str) -> V
     items
 }
 
+/// Parse column alignments from a pipe_table_delimiter_row.
+///
+/// The delimiter row looks like `| --- | :---: | ---: |`. We parse each
+/// column's alignment marker to determine left, center, or right alignment.
+fn parse_delimiter_alignments(row_node: &arborium_tree_sitter::Node, source: &str) -> Vec<String> {
+    let text = node_text(row_node, source);
+    let stripped = text.trim().trim_start_matches('|').trim_end_matches('|');
+    stripped
+        .split('|')
+        .map(|col| {
+            let trimmed = col.trim();
+            let starts_colon = trimmed.starts_with(':');
+            let ends_colon = trimmed.ends_with(':');
+            match (starts_colon, ends_colon) {
+                (true, true) => "center".to_string(),
+                (false, true) => "right".to_string(),
+                _ => "left".to_string(),
+            }
+        })
+        .collect()
+}
+
 /// Convert children of a pipe_table node into Table{Header,Row} nodes.
 ///
 /// A pipe_table has children: pipe_table_header, pipe_table_delimiter_row,
-/// and one or more pipe_table_row. We skip the delimiter row (it's just
-/// visual formatting) and convert header/data rows into structured nodes.
+/// and one or more pipe_table_row. We parse the delimiter row to extract
+/// column alignments, then apply them as attrs on each cell.
 fn convert_table_children(
     table_node: &arborium_tree_sitter::Node,
     source: &str,
 ) -> Vec<Node> {
-    let mut rows = Vec::new();
+    // First pass: find the delimiter row and extract alignments.
+    let mut alignments = Vec::new();
     let mut cursor = table_node.walk();
-
     for child in table_node.named_children(&mut cursor) {
+        if child.kind() == "pipe_table_delimiter_row" {
+            alignments = parse_delimiter_alignments(&child, source);
+            break;
+        }
+    }
+
+    // Second pass: convert header and data rows, passing alignments.
+    let mut rows = Vec::new();
+    let mut cursor2 = table_node.walk();
+    for child in table_node.named_children(&mut cursor2) {
         match child.kind() {
             "pipe_table_header" => {
-                let cells = convert_table_cells(&child, source);
+                let cells = convert_table_cells(&child, source, &alignments);
                 rows.push(Node::branch(
                     NodeType::TableHeader,
                     Fragment::from_vec(cells),
                 ));
             }
             "pipe_table_row" => {
-                let cells = convert_table_cells(&child, source);
+                let cells = convert_table_cells(&child, source, &alignments);
                 rows.push(Node::branch(
                     NodeType::TableRow,
                     Fragment::from_vec(cells),
                 ));
             }
-            // Skip delimiter row (| --- | --- |)
+            // Skip delimiter row (already parsed above)
             _ => {}
         }
     }
@@ -318,19 +351,32 @@ fn convert_table_children(
 ///
 /// The raw text looks like `| col1 | col2 | col3 |`. We split on `|`,
 /// trim each cell, and parse inline markdown (bold, italic, code, links).
+///
+/// Cells whose column alignment (from `alignments`) is not "left" get an
+/// `align` attr so the alignment survives the document round-trip.
 fn convert_table_cells(
     row_node: &arborium_tree_sitter::Node,
     source: &str,
+    alignments: &[String],
 ) -> Vec<Node> {
     let text = node_text(row_node, source);
     // Strip leading/trailing pipe and split on `|`
     let stripped = text.trim().trim_start_matches('|').trim_end_matches('|');
     stripped
         .split('|')
-        .map(|cell_text| {
+        .enumerate()
+        .map(|(i, cell_text)| {
             let trimmed = cell_text.trim();
             let inlines = parse_inline(trimmed);
-            Node::branch(NodeType::TableCell, Fragment::from_vec(inlines))
+            if let Some(align) = alignments.get(i).filter(|a| *a != "left") {
+                Node::branch_with_attrs(
+                    NodeType::TableCell,
+                    table_cell_attrs(align),
+                    Fragment::from_vec(inlines),
+                )
+            } else {
+                Node::branch(NodeType::TableCell, Fragment::from_vec(inlines))
+            }
         })
         .collect()
 }
