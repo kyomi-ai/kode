@@ -1079,8 +1079,11 @@ pub fn TreeWysiwygEditor(
                 if in_table {
                     if shift {
                         ds.move_to_prev_cell()
+                    } else if !ds.move_to_next_cell() {
+                        ds.insert_row_below();
+                        true
                     } else {
-                        ds.move_to_next_cell()
+                        true
                     }
                 } else {
                     let md = ds.to_markdown();
