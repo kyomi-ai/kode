@@ -3119,3 +3119,157 @@ mod cursor_movement_tests {
         assert_eq!(state.doc().child(1).text_content(), "chart2");
     }
 }
+
+mod table_editing_tests {
+    use crate::doc_state::*;
+    use crate::serialize::serialize_markdown;
+
+    // Table markdown used for all tests:
+    //   "| A | B |\n| --- | --- |\n| hello | world |"
+    //
+    // Parsed tree positions (verified via resolve):
+    //   0:  Doc boundary
+    //   1:  Table open
+    //   2:  TableHeader open
+    //   3:  TableCell "A" content start (parent_offset=0)
+    //   4:  after "A" (parent_offset=1)
+    //   5:  TableCell "B" open
+    //   6:  TableCell "B" content start (parent_offset=0)
+    //   7:  after "B" (parent_offset=1)
+    //   8:  TableHeader close
+    //   9:  Table second child boundary
+    //  10:  TableRow open
+    //  11:  TableCell "hello" content start (parent_offset=0)
+    //  12:  after "h" (parent_offset=1)
+    //  13:  after "he" (parent_offset=2)
+    //  14:  after "hel" (parent_offset=3)
+    //  15:  after "hell" (parent_offset=4)
+    //  16:  after "hello" (parent_offset=5, end of content)
+    //  17:  TableCell "world" open
+    //  18:  TableCell "world" content start (parent_offset=0)
+    //  19-23: "world" chars
+    //  24:  TableRow close
+    //  25:  Table close
+    //  26:  Doc boundary
+
+    const TABLE_MD: &str = "| A | B |\n| --- | --- |\n| hello | world |";
+
+    #[test]
+    fn table_insert_text_in_cell() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 11 = start of "hello" cell content (parent_offset=0)
+        state.set_selection(Selection::cursor(11));
+        state.insert_text("X");
+
+        let md = serialize_markdown(state.doc());
+        assert!(
+            md.contains("Xhello"),
+            "cell should contain 'Xhello', got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn table_enter_inserts_newline() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+
+        // pos 13 = after "he" in "hello" (parent_offset=2)
+        state.set_selection(Selection::cursor(13));
+        state.split_block();
+
+        // Table structure must be preserved: still one table with header + row.
+        let table = state.doc().child(0);
+        assert_eq!(
+            table.node_type,
+            crate::node_type::NodeType::Table,
+            "first child should still be a Table"
+        );
+        assert_eq!(
+            table.child_count(),
+            2,
+            "table should still have 2 children (header + row)"
+        );
+
+        // The cell content should now contain a newline between "he" and "llo".
+        let row = table.child(1);
+        let cell = row.child(0);
+        let cell_text = cell.text_content();
+        assert!(
+            cell_text.contains('\n'),
+            "cell should contain a newline after split_block, got: {cell_text:?}"
+        );
+        assert!(
+            cell_text.contains("he") && cell_text.contains("llo"),
+            "cell should contain 'he' and 'llo' around the newline, got: {cell_text:?}"
+        );
+
+        // Verify we didn't accidentally produce a second table or extra rows.
+        assert_eq!(
+            state.doc().child_count(),
+            1,
+            "doc should still have exactly 1 child (the table)"
+        );
+    }
+
+    #[test]
+    fn table_backspace_at_cell_start_is_noop() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        let before_md = serialize_markdown(state.doc());
+
+        // pos 11 = start of "hello" cell content (parent_offset=0)
+        state.set_selection(Selection::cursor(11));
+        state.backspace();
+
+        let after_md = serialize_markdown(state.doc());
+        assert_eq!(
+            before_md, after_md,
+            "backspace at cell start should be a no-op"
+        );
+    }
+
+    #[test]
+    fn table_backspace_mid_cell_deletes_char() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+
+        // pos 13 = after "he" in "hello" (parent_offset=2)
+        state.set_selection(Selection::cursor(13));
+        state.backspace();
+
+        let md = serialize_markdown(state.doc());
+        assert!(
+            md.contains("hllo"),
+            "backspace should delete 'e', producing 'hllo', got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn table_delete_at_cell_end_is_noop() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        let before_md = serialize_markdown(state.doc());
+
+        // pos 16 = end of "hello" content (parent_offset=5)
+        state.set_selection(Selection::cursor(16));
+        state.delete_forward();
+
+        let after_md = serialize_markdown(state.doc());
+        assert_eq!(
+            before_md, after_md,
+            "delete at cell end should be a no-op"
+        );
+    }
+
+    #[test]
+    fn table_delete_mid_cell_deletes_char() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+
+        // pos 13 = after "he" in "hello" (parent_offset=2)
+        // delete_forward removes the character AFTER cursor = 'l' at offset 2
+        state.set_selection(Selection::cursor(13));
+        state.delete_forward();
+
+        let md = serialize_markdown(state.doc());
+        assert!(
+            md.contains("helo"),
+            "delete should remove first 'l', producing 'helo', got: {md:?}"
+        );
+    }
+}

@@ -1344,6 +1344,7 @@ mod tests {
             "---",
             "[link](https://example.com)",
             "![img](photo.png)",
+            "| A | B |\n| --- | --- |\n| 1 | 2 |",
         ];
 
         for input in inputs {
@@ -1483,5 +1484,31 @@ mod tests {
         let byte = tree_pos_to_byte_offset(&doc, &md, 1);
         let back = byte_offset_to_tree_pos(&doc, &md, byte);
         assert_eq!(back, 1);
+    }
+
+    // ── Table round-trip tests ─────────────────────────────────────
+
+    #[test]
+    fn round_trip_simple_table() {
+        let input = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+        let tree = parse_markdown(input);
+        let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn round_trip_table_with_formatting() {
+        let input = "| **bold** | *italic* |\n| --- | --- |\n| plain | `code` |";
+        let tree = parse_markdown(input);
+        let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn round_trip_table_in_document() {
+        let input = "# Title\n\nSome text\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nMore text";
+        let tree = parse_markdown(input);
+        let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
     }
 }

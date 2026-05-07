@@ -1472,6 +1472,101 @@ mod tests {
         let result = find_backtick_content(&[], 0, 1);
         assert!(result.is_none());
     }
+
+    // ── Table parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_simple_table() {
+        let doc = parse_markdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
+        assert_eq!(doc.child_count(), 1);
+
+        let table = doc.child(0);
+        assert_eq!(table.node_type, NodeType::Table);
+        assert_eq!(table.child_count(), 2);
+
+        // First child: TableHeader
+        let header = table.child(0);
+        assert_eq!(header.node_type, NodeType::TableHeader);
+        assert_eq!(header.child_count(), 2);
+        assert_eq!(header.child(0).node_type, NodeType::TableCell);
+        assert_eq!(header.child(0).text_content(), "A");
+        assert_eq!(header.child(1).node_type, NodeType::TableCell);
+        assert_eq!(header.child(1).text_content(), "B");
+
+        // Second child: TableRow (data row)
+        let row = table.child(1);
+        assert_eq!(row.node_type, NodeType::TableRow);
+        assert_eq!(row.child_count(), 2);
+        assert_eq!(row.child(0).text_content(), "1");
+        assert_eq!(row.child(1).text_content(), "2");
+    }
+
+    #[test]
+    fn parse_table_with_inline_formatting() {
+        let doc =
+            parse_markdown("| **bold** | *italic* |\n| --- | --- |\n| plain | `code` |");
+
+        let table = doc.child(0);
+        assert_eq!(table.node_type, NodeType::Table);
+
+        // Header cells: bold and italic marks
+        let header = table.child(0);
+        assert_eq!(header.node_type, NodeType::TableHeader);
+        assert_eq!(header.child_count(), 2);
+
+        let bold_cell = header.child(0);
+        assert_eq!(bold_cell.node_type, NodeType::TableCell);
+        assert_eq!(bold_cell.child_count(), 1);
+        let bold_text = bold_cell.child(0);
+        assert_eq!(bold_text.text(), Some("bold"));
+        assert_eq!(bold_text.marks.len(), 1);
+        assert_eq!(bold_text.marks[0].mark_type, MarkType::Strong);
+
+        let italic_cell = header.child(1);
+        assert_eq!(italic_cell.node_type, NodeType::TableCell);
+        assert_eq!(italic_cell.child_count(), 1);
+        let italic_text = italic_cell.child(0);
+        assert_eq!(italic_text.text(), Some("italic"));
+        assert_eq!(italic_text.marks.len(), 1);
+        assert_eq!(italic_text.marks[0].mark_type, MarkType::Em);
+
+        // Body cells: plain text and code mark
+        let row = table.child(1);
+        assert_eq!(row.node_type, NodeType::TableRow);
+        assert_eq!(row.child_count(), 2);
+
+        let plain_cell = row.child(0);
+        assert_eq!(plain_cell.text_content(), "plain");
+        assert_eq!(plain_cell.child_count(), 1);
+        assert!(plain_cell.child(0).marks.is_empty());
+
+        let code_cell = row.child(1);
+        assert_eq!(code_cell.text_content(), "code");
+        assert_eq!(code_cell.child_count(), 1);
+        let code_text = code_cell.child(0);
+        assert_eq!(code_text.marks.len(), 1);
+        assert_eq!(code_text.marks[0].mark_type, MarkType::Code);
+    }
+
+    #[test]
+    fn parse_table_multiple_rows() {
+        let doc = parse_markdown("| X |\n| --- |\n| a |\n| b |\n| c |");
+
+        let table = doc.child(0);
+        assert_eq!(table.node_type, NodeType::Table);
+        // 1 header + 3 data rows = 4 children
+        assert_eq!(table.child_count(), 4);
+
+        assert_eq!(table.child(0).node_type, NodeType::TableHeader);
+        assert_eq!(table.child(1).node_type, NodeType::TableRow);
+        assert_eq!(table.child(2).node_type, NodeType::TableRow);
+        assert_eq!(table.child(3).node_type, NodeType::TableRow);
+
+        assert_eq!(table.child(0).text_content(), "X");
+        assert_eq!(table.child(1).text_content(), "a");
+        assert_eq!(table.child(2).text_content(), "b");
+        assert_eq!(table.child(3).text_content(), "c");
+    }
 }
 
 #[cfg(test)]
