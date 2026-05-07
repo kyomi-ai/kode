@@ -133,4 +133,62 @@ test.describe('WYSIWYG Table Support', () => {
     // Table should still be present
     await expect(page.locator('.wysiwyg-table')).toBeVisible();
   });
+
+  test('Tab navigates to next table cell', async ({ page }) => {
+    const table = page.locator('.wysiwyg-table');
+    await expect(table).toBeVisible();
+
+    // Click on the first header cell
+    const firstHeader = table.locator('thead th').first();
+    await firstHeader.click();
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute?.('contenteditable') === 'true'
+    );
+
+    // Press Tab to move to next cell
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(200);
+
+    // Table structure should still be intact (Tab should not break things)
+    await expect(table.locator('th')).toHaveCount(4);
+    await expect(table.locator('td')).toHaveCount(12);
+
+    // Verify focus is still in the table (the selection moved)
+    const activeInTable = await page.evaluate(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return false;
+      const node = sel.anchorNode;
+      return node?.parentElement?.closest('table') !== null;
+    });
+    expect(activeInTable).toBe(true);
+  });
+
+  test('Shift+Tab navigates to previous table cell', async ({ page }) => {
+    const table = page.locator('.wysiwyg-table');
+    await expect(table).toBeVisible();
+
+    // Click on the second header cell
+    const secondHeader = table.locator('thead th').nth(1);
+    await secondHeader.click();
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute?.('contenteditable') === 'true'
+    );
+
+    // Press Shift+Tab to move to previous cell
+    await page.keyboard.press('Shift+Tab');
+    await page.waitForTimeout(200);
+
+    // Table structure should still be intact
+    await expect(table.locator('th')).toHaveCount(4);
+    await expect(table.locator('td')).toHaveCount(12);
+
+    // Verify focus is still in the table
+    const activeInTable = await page.evaluate(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return false;
+      const node = sel.anchorNode;
+      return node?.parentElement?.closest('table') !== null;
+    });
+    expect(activeInTable).toBe(true);
+  });
 });

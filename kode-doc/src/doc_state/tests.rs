@@ -3272,4 +3272,347 @@ mod table_editing_tests {
             "delete should remove first 'l', producing 'helo', got: {md:?}"
         );
     }
+
+    // ── Navigation tests ──────────────────────────────────────────────
+
+    #[test]
+    fn table_move_to_next_cell() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 3 = first header cell "A" content start
+        state.set_selection(Selection::cursor(3));
+        let moved = state.move_to_next_cell();
+        assert!(moved, "move_to_next_cell should return true");
+        // pos 6 = second header cell "B" content start
+        assert_eq!(
+            state.selection.head, 6,
+            "cursor should be in the second header cell"
+        );
+    }
+
+    #[test]
+    fn table_move_to_next_cell_wraps_row() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 6 = last header cell "B" content start
+        state.set_selection(Selection::cursor(6));
+        let moved = state.move_to_next_cell();
+        assert!(moved, "move_to_next_cell should return true when wrapping");
+        // pos 11 = first cell of data row "hello" content start
+        assert_eq!(
+            state.selection.head, 11,
+            "cursor should wrap to first cell of next row"
+        );
+    }
+
+    #[test]
+    fn table_move_to_next_cell_returns_false_at_end() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 18 = last cell "world" content start (last row, last cell)
+        state.set_selection(Selection::cursor(18));
+        let moved = state.move_to_next_cell();
+        assert!(!moved, "move_to_next_cell should return false at end of table");
+    }
+
+    #[test]
+    fn table_move_to_prev_cell() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 6 = second header cell "B" content start
+        state.set_selection(Selection::cursor(6));
+        let moved = state.move_to_prev_cell();
+        assert!(moved, "move_to_prev_cell should return true");
+        // pos 3 = first header cell "A" content start
+        assert_eq!(
+            state.selection.head, 3,
+            "cursor should be in the first header cell"
+        );
+    }
+
+    #[test]
+    fn table_move_to_prev_cell_wraps_row() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 11 = first cell of data row "hello" content start
+        state.set_selection(Selection::cursor(11));
+        let moved = state.move_to_prev_cell();
+        assert!(moved, "move_to_prev_cell should return true when wrapping");
+        // pos 6 = last cell of header row "B" content start
+        assert_eq!(
+            state.selection.head, 6,
+            "cursor should wrap to last cell of previous row"
+        );
+    }
+
+    #[test]
+    fn table_move_to_prev_cell_returns_false_at_start() {
+        let mut state = DocState::from_markdown(TABLE_MD);
+        // pos 3 = first header cell "A" content start (first row, first cell)
+        state.set_selection(Selection::cursor(3));
+        let moved = state.move_to_prev_cell();
+        assert!(!moved, "move_to_prev_cell should return false at start of table");
+    }
+
+    // ── Insert table test ─────────────────────────────────────────────
+
+    #[test]
+    fn table_insert_table_creates_structure() {
+        let mut state = DocState::from_markdown("Hello");
+        // pos 1 = inside the paragraph, at "H"
+        state.set_selection(Selection::cursor(1));
+        state.insert_table();
+
+        let md = serialize_markdown(state.doc());
+        // insert_table creates 3 columns, 1 header + 2 body rows.
+        // Verify the output contains a pipe table with header + delimiter + 2 data rows.
+        let lines: Vec<&str> = md.lines().collect();
+        let table_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with('|')).collect();
+        assert!(
+            table_lines.len() >= 4,
+            "should have at least 4 pipe rows (header + delimiter + 2 data), got: {md:?}"
+        );
+        // Check delimiter row exists
+        assert!(
+            md.contains("| --- | --- | --- |"),
+            "should contain a 3-column delimiter row, got: {md:?}"
+        );
+    }
+
+    // ── Row operation tests ───────────────────────────────────────────
+
+    // Extended table: header + 2 data rows for row/column operation tests.
+    //
+    // "| A | B |\n| --- | --- |\n| c | d |\n| e | f |"
+    //
+    // Position map:
+    //   0:  Doc boundary
+    //   1:  Table content start
+    //   2:  TableHeader content start
+    //   3:  Cell "A" content start
+    //   4:  after "A"
+    //   5:  Cell "B" open
+    //   6:  Cell "B" content start
+    //   7:  after "B"
+    //   8:  TableHeader close
+    //   9:  TableRow 1 start
+    //  10:  TableRow 1 content start
+    //  11:  Cell "c" content start
+    //  12:  after "c"
+    //  13:  Cell "d" open
+    //  14:  Cell "d" content start
+    //  15:  after "d"
+    //  16:  TableRow 1 close
+    //  17:  TableRow 2 start
+    //  18:  TableRow 2 content start
+    //  19:  Cell "e" content start
+    //  20:  after "e"
+    //  21:  Cell "f" open
+    //  22:  Cell "f" content start
+    //  23:  after "f"
+    //  24:  TableRow 2 close
+    //  25:  Table close
+    //  26:  Doc boundary
+    const EXTENDED_TABLE_MD: &str =
+        "| A | B |\n| --- | --- |\n| c | d |\n| e | f |";
+
+    fn count_pipe_rows(md: &str) -> usize {
+        md.lines().filter(|l| l.starts_with('|')).count()
+    }
+
+    fn count_cells_in_row(line: &str) -> usize {
+        // Count pipe-delimited cells: "| a | b |" -> 2 cells.
+        let trimmed = line.trim().trim_start_matches('|').trim_end_matches('|');
+        trimmed.split('|').count()
+    }
+
+    #[test]
+    fn table_insert_row_below() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 11 = first cell of first data row "c" content start
+        state.set_selection(Selection::cursor(11));
+        state.insert_row_below();
+
+        let md = serialize_markdown(state.doc());
+        // Original: header + delim + 2 data = 4 pipe rows.
+        // After insert: header + delim + 3 data = 5 pipe rows.
+        assert_eq!(
+            count_pipe_rows(&md),
+            5,
+            "should have 5 pipe rows after insert_row_below, got: {md:?}"
+        );
+        // Every pipe row should have 2 cells.
+        for line in md.lines().filter(|l| l.starts_with('|') && !l.contains("---")) {
+            assert_eq!(
+                count_cells_in_row(line),
+                2,
+                "every row should have 2 cells, got line: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn table_insert_row_above() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 19 = first cell of second data row "e" content start
+        state.set_selection(Selection::cursor(19));
+        state.insert_row_above();
+
+        let md = serialize_markdown(state.doc());
+        // Original: 4 pipe rows. After insert above: 5 pipe rows.
+        assert_eq!(
+            count_pipe_rows(&md),
+            5,
+            "should have 5 pipe rows after insert_row_above, got: {md:?}"
+        );
+        // The new row should appear between "c | d" and "e | f".
+        let data_lines: Vec<&str> = md
+            .lines()
+            .filter(|l| l.starts_with('|') && !l.contains("---"))
+            .collect();
+        // data_lines: header, row "c|d", new empty row, row "e|f"
+        // The row with "e" should be at index 3 (0-indexed).
+        assert!(
+            data_lines.last().unwrap().contains('e'),
+            "last data row should still contain 'e', got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn table_insert_row_above_on_header_inserts_below() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 3 = header cell "A" content start
+        state.set_selection(Selection::cursor(3));
+        state.insert_row_above();
+
+        let md = serialize_markdown(state.doc());
+        // Can't insert above header, so it inserts below. 5 pipe rows total.
+        assert_eq!(
+            count_pipe_rows(&md),
+            5,
+            "should have 5 pipe rows after insert_row_above on header, got: {md:?}"
+        );
+        // Header should still be first: "| A | B |"
+        let first_line = md.lines().next().unwrap();
+        assert!(
+            first_line.contains('A') && first_line.contains('B'),
+            "header should still be first row, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn table_delete_row() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 11 = first cell of first data row "c" content start
+        state.set_selection(Selection::cursor(11));
+        state.delete_row();
+
+        let md = serialize_markdown(state.doc());
+        // Original: 4 pipe rows. After delete: 3 pipe rows.
+        assert_eq!(
+            count_pipe_rows(&md),
+            3,
+            "should have 3 pipe rows after delete_row, got: {md:?}"
+        );
+        // The deleted row's content ("c", "d") should be gone.
+        assert!(
+            !md.contains("| c |"),
+            "deleted row's content should be gone, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn table_delete_row_noop_on_header() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        let before_md = serialize_markdown(state.doc());
+        // pos 3 = header cell "A" content start
+        state.set_selection(Selection::cursor(3));
+        state.delete_row();
+
+        let after_md = serialize_markdown(state.doc());
+        assert_eq!(
+            before_md, after_md,
+            "delete_row on header should be a no-op"
+        );
+    }
+
+    // ── Column operation tests ────────────────────────────────────────
+
+    #[test]
+    fn table_insert_column_right() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 3 = header cell "A" content start (column 0)
+        state.set_selection(Selection::cursor(3));
+        state.insert_column_right();
+
+        let md = serialize_markdown(state.doc());
+        // Every row should now have 3 cells (was 2).
+        for line in md.lines().filter(|l| l.starts_with('|') && !l.contains("---")) {
+            assert_eq!(
+                count_cells_in_row(line),
+                3,
+                "every row should have 3 cells after insert_column_right, got line: {line:?}"
+            );
+        }
+        // Delimiter row should also have 3 columns.
+        let delim_line = md.lines().find(|l| l.contains("---")).unwrap();
+        assert_eq!(
+            count_cells_in_row(delim_line),
+            3,
+            "delimiter row should have 3 columns, got: {delim_line:?}"
+        );
+    }
+
+    #[test]
+    fn table_insert_column_left() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 6 = header cell "B" content start (column 1)
+        state.set_selection(Selection::cursor(6));
+        state.insert_column_left();
+
+        let md = serialize_markdown(state.doc());
+        // Every row should now have 3 cells (was 2).
+        for line in md.lines().filter(|l| l.starts_with('|') && !l.contains("---")) {
+            assert_eq!(
+                count_cells_in_row(line),
+                3,
+                "every row should have 3 cells after insert_column_left, got line: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn table_delete_column() {
+        let mut state = DocState::from_markdown(EXTENDED_TABLE_MD);
+        // pos 3 = header cell "A" content start (column 0)
+        state.set_selection(Selection::cursor(3));
+        state.delete_column();
+
+        let md = serialize_markdown(state.doc());
+        // Every row should now have 1 cell (was 2).
+        for line in md.lines().filter(|l| l.starts_with('|') && !l.contains("---")) {
+            assert_eq!(
+                count_cells_in_row(line),
+                1,
+                "every row should have 1 cell after delete_column, got line: {line:?}"
+            );
+        }
+        // Column "A" content should be gone from header.
+        let first_line = md.lines().next().unwrap();
+        assert!(
+            !first_line.contains('A'),
+            "deleted column 'A' should be gone, got: {first_line:?}"
+        );
+    }
+
+    #[test]
+    fn table_delete_column_noop_on_single_column() {
+        let single_col_md = "| X |\n| --- |\n| a |";
+        let mut state = DocState::from_markdown(single_col_md);
+        let before_md = serialize_markdown(state.doc());
+        // pos 3 = cell "X" content start
+        state.set_selection(Selection::cursor(3));
+        state.delete_column();
+
+        let after_md = serialize_markdown(state.doc());
+        assert_eq!(
+            before_md, after_md,
+            "delete_column on single-column table should be a no-op"
+        );
+    }
 }

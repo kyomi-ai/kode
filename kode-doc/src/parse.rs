@@ -1613,6 +1613,59 @@ mod tests {
         assert_eq!(table.child(2).text_content(), "b");
         assert_eq!(table.child(3).text_content(), "c");
     }
+
+    #[test]
+    fn parse_table_alignment() {
+        let doc =
+            parse_markdown("| Left | Center | Right |\n| --- | :---: | ---: |\n| a | b | c |");
+
+        let table = doc.child(0);
+        assert_eq!(table.node_type, NodeType::Table);
+
+        let header = table.child(0);
+        assert_eq!(header.node_type, NodeType::TableHeader);
+        assert_eq!(header.child_count(), 3);
+
+        // First cell: no align attr (left-aligned by default).
+        let left_cell = header.child(0);
+        assert_eq!(left_cell.text_content(), "Left");
+        assert_eq!(
+            get_attr(&left_cell.attrs, "align"),
+            None,
+            "left-aligned cell should have no align attr"
+        );
+
+        // Second cell: align="center".
+        let center_cell = header.child(1);
+        assert_eq!(center_cell.text_content(), "Center");
+        assert_eq!(
+            get_attr(&center_cell.attrs, "align"),
+            Some(&AttrValue::String("center".to_string())),
+            "second cell should have align=center"
+        );
+
+        // Third cell: align="right".
+        let right_cell = header.child(2);
+        assert_eq!(right_cell.text_content(), "Right");
+        assert_eq!(
+            get_attr(&right_cell.attrs, "align"),
+            Some(&AttrValue::String("right".to_string())),
+            "third cell should have align=right"
+        );
+
+        // Data row cells should also inherit alignment attrs.
+        let data_row = table.child(1);
+        assert_eq!(data_row.child_count(), 3);
+        assert_eq!(get_attr(&data_row.child(0).attrs, "align"), None);
+        assert_eq!(
+            get_attr(&data_row.child(1).attrs, "align"),
+            Some(&AttrValue::String("center".to_string()))
+        );
+        assert_eq!(
+            get_attr(&data_row.child(2).attrs, "align"),
+            Some(&AttrValue::String("right".to_string()))
+        );
+    }
 }
 
 #[cfg(test)]

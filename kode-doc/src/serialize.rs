@@ -1517,4 +1517,12 @@ mod tests {
         let output = serialize_markdown(&tree);
         assert_eq!(output, input);
     }
+
+    #[test]
+    fn round_trip_table_with_alignment() {
+        let input = "| Left | Center | Right |\n| --- | :---: | ---: |\n| a | b | c |";
+        let tree = parse_markdown(input);
+        let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
+    }
 }
