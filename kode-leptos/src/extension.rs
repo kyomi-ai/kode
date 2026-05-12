@@ -26,8 +26,10 @@ pub struct ExtensionEditorContext<'a> {
 pub struct ExtensionToolbarItem {
     /// Button content — text, icon, or any Leptos view.
     pub label: AnyView,
-    /// Tooltip/title text.
+    /// Tooltip/title text. Also used as the label in the slash command menu.
     pub title: String,
+    /// Subtitle shown in the slash command menu (e.g., "Add a chart block").
+    pub description: String,
     /// Toolbar group index (for visual grouping with separators).
     pub group: u8,
     /// Action to execute when clicked. Receives mutable editor access.

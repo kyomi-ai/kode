@@ -28,6 +28,15 @@ pub fn MarkdownEditorComponent(
     /// and keyboard shortcuts. Passed through to the WYSIWYG editor.
     #[prop(default = vec![])]
     extensions: Vec<Arc<dyn Extension>>,
+    /// Whether to show the fixed formatting toolbar at the top.
+    #[prop(default = true)]
+    show_fixed_toolbar: bool,
+    /// Whether to show a floating toolbar near the text selection.
+    #[prop(default = false)]
+    show_floating_toolbar: bool,
+    /// Whether to show the slash command menu on empty lines.
+    #[prop(default = true)]
+    show_slash_menu: bool,
     /// Enable drag-and-drop reordering of blocks. Passed through to the
     /// WYSIWYG editor.
     #[prop(default = false)]
@@ -91,7 +100,9 @@ pub fn MarkdownEditorComponent(
                                 <TreeWysiwygEditor
                                     content=content
                                     on_change=cb
-                                    show_toolbar=true
+                                    show_fixed_toolbar=show_fixed_toolbar
+                                    show_floating_toolbar=show_floating_toolbar
+                                    show_slash_menu=show_slash_menu
                                     theme=theme
                                     extensions=exts
                                     enable_block_drag=enable_block_drag

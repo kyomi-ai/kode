@@ -205,6 +205,27 @@ pub fn default_toolbar_items() -> Vec<ToolbarItem> {
     ]
 }
 
+// ── Slash menu ─────────────────────────────────────────────────────────────
+
+pub enum SlashMenuItem {
+    Builtin { button: BuiltinButton, label: &'static str, description: &'static str },
+    Extension { label: String, description: String, ext_index: usize },
+}
+
+pub fn default_slash_menu_items() -> Vec<SlashMenuItem> {
+    vec![
+        SlashMenuItem::Builtin { button: BuiltinButton::H1, label: "Heading 1", description: "Large section heading" },
+        SlashMenuItem::Builtin { button: BuiltinButton::H2, label: "Heading 2", description: "Medium section heading" },
+        SlashMenuItem::Builtin { button: BuiltinButton::H3, label: "Heading 3", description: "Small section heading" },
+        SlashMenuItem::Builtin { button: BuiltinButton::BulletList, label: "Bullet List", description: "Unordered list" },
+        SlashMenuItem::Builtin { button: BuiltinButton::OrderedList, label: "Ordered List", description: "Numbered list" },
+        SlashMenuItem::Builtin { button: BuiltinButton::Blockquote, label: "Blockquote", description: "Quote block" },
+        SlashMenuItem::Builtin { button: BuiltinButton::CodeBlock, label: "Code Block", description: "Fenced code block" },
+        SlashMenuItem::Builtin { button: BuiltinButton::HorizontalRule, label: "Horizontal Rule", description: "Divider line" },
+        SlashMenuItem::Builtin { button: BuiltinButton::Table, label: "Table", description: "Insert a table" },
+    ]
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 // Used by the `Toolbar` component (for MarkdownEditorComponent).
 

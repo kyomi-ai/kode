@@ -23,7 +23,7 @@ use web_sys::{CompositionEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::extension::{matches_key_descriptor, Extension, ExtensionKeyboardShortcut, ExtensionToolbarItem};
 use crate::theme::Theme;
-use crate::toolbar::{InjectCommand, ToolbarItem, default_toolbar_items, dispatch_builtin_action};
+use crate::toolbar::{InjectCommand, SlashMenuItem, ToolbarItem, default_slash_menu_items, default_toolbar_items, dispatch_builtin_action};
 
 use super::clipboard::{html_escape, extract_kode_markdown};
 use super::doc_renderer::{doc_to_segments, RenderSegment};
@@ -41,9 +41,15 @@ pub fn TreeWysiwygEditor(
     /// Callback fired when the document changes.
     #[prop(optional)]
     on_change: Option<Arc<dyn Fn(String) + Send + Sync>>,
-    /// Whether to show the formatting toolbar.
+    /// Whether to show the fixed formatting toolbar at the top.
     #[prop(default = true)]
-    show_toolbar: bool,
+    show_fixed_toolbar: bool,
+    /// Whether to show a floating toolbar near the text selection.
+    #[prop(default = false)]
+    show_floating_toolbar: bool,
+    /// Whether to show the slash command menu on empty lines.
+    #[prop(default = true)]
+    show_slash_menu: bool,
     /// Editor theme.
     #[prop(into, default = Signal::stored(Theme::default()))]
     theme: Signal<Theme>,
@@ -53,9 +59,12 @@ pub fn TreeWysiwygEditor(
     /// Override the max-width of the editor container (default: "800px").
     #[prop(into, optional)]
     container_max_width: Option<String>,
-    /// Custom toolbar layout. When `None`, the default built-in buttons are shown.
+    /// Custom toolbar layout for the fixed toolbar.
     #[prop(optional)]
     toolbar_items: Option<Vec<ToolbarItem>>,
+    /// Custom toolbar layout for the floating toolbar.
+    #[prop(optional)]
+    floating_toolbar_items: Option<Vec<ToolbarItem>>,
     /// Inject content at the current cursor position.
     #[prop(optional)]
     inject: Option<RwSignal<Option<InjectCommand>>>,
@@ -99,6 +108,8 @@ pub fn TreeWysiwygEditor(
 
     let editor_ref = NodeRef::<leptos::html::Div>::new();
     let keydown_handled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mouse_selecting = std::rc::Rc::new(std::cell::Cell::new(false));
+    let floating_pos: RwSignal<Option<f64>> = RwSignal::new(None);
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
     struct DragState {
@@ -125,6 +136,32 @@ pub fn TreeWysiwygEditor(
     );
     let extension_toolbar_items: Vec<ExtensionToolbarItem> =
         extensions.iter().flat_map(|ext| ext.toolbar_items()).collect();
+
+    type ExtAction = Arc<dyn Fn(&mut kode_markdown::MarkdownEditor) + Send + Sync>;
+    let ext_actions: Arc<Vec<ExtAction>> = Arc::new(
+        extension_toolbar_items.iter().map(|item| Arc::clone(&item.action)).collect()
+    );
+
+    let slash_menu_index = RwSignal::new(0usize);
+    let slash_menu_state: RwSignal<Option<(f64, f64, f64, bool)>> = RwSignal::new(None);
+    let slash_trigger_el: std::rc::Rc<std::cell::RefCell<Option<web_sys::Element>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+
+    let slash_menu_items: Arc<Vec<SlashMenuItem>> = Arc::new(if show_slash_menu {
+        let mut items = default_slash_menu_items();
+        for (i, ext_item) in extension_toolbar_items.iter().enumerate() {
+            items.push(SlashMenuItem::Extension {
+                label: ext_item.title.clone(),
+                description: ext_item.description.clone(),
+                ext_index: i,
+            });
+        }
+        items
+    } else {
+        Vec::new()
+    });
+    let slash_item_count = slash_menu_items.len();
+
     let extensions: Arc<Vec<Arc<dyn Extension>>> = Arc::new(extensions);
     let language_aliases: Arc<Vec<(String, String)>> = Arc::new(language_aliases);
 
@@ -919,6 +956,9 @@ pub fn TreeWysiwygEditor(
     let notify_key = notify.clone();
     let extension_shortcuts_key: Arc<Vec<ExtensionKeyboardShortcut>> = Arc::clone(&extension_shortcuts);
     let keydown_handled_key = keydown_handled.clone();
+    let ext_actions_key = Arc::clone(&ext_actions);
+    let slash_menu_items_key = Arc::clone(&slash_menu_items);
+    let slash_trigger_for_scroll = slash_trigger_el.clone();
     let on_keydown = move |ev: KeyboardEvent| {
         if composing.get_untracked() {
             return;
@@ -933,6 +973,84 @@ pub fn TreeWysiwygEditor(
             "c" | "x" | "v" if ctrl => return,
             _ => {}
         }
+
+        // ── Slash menu interaction ──────────────────────────────────────
+        if slash_menu_state.get_untracked().is_some() {
+            match key.as_str() {
+                "ArrowDown" => {
+                    slash_menu_index.update(|i| *i = (*i + 1) % slash_item_count);
+                    ev.prevent_default();
+                    return;
+                }
+                "ArrowUp" => {
+                    slash_menu_index.update(|i| {
+                        *i = if *i == 0 { slash_item_count - 1 } else { *i - 1 };
+                    });
+                    ev.prevent_default();
+                    return;
+                }
+                "Enter" => {
+                    let idx = slash_menu_index.get_untracked();
+                    slash_menu_state.set(None);
+                    if idx < slash_item_count {
+                        let Ok(mut ds) = doc_key.lock() else { return };
+                        match &slash_menu_items_key[idx] {
+                            SlashMenuItem::Builtin { button, .. } => {
+                                dispatch_builtin_action(&mut ds, *button);
+                            }
+                            SlashMenuItem::Extension { ext_index, .. } => {
+                                if let Some(action) = ext_actions_key.get(*ext_index) {
+                                    apply_md_command(&mut ds, |e| { (action)(e); });
+                                } else {
+                                    drop(ds);
+                                    ev.prevent_default();
+                                    return;
+                                }
+                            }
+                        }
+                        let md = ds.to_markdown();
+                        drop(ds);
+                        (notify_key)(Some(md));
+                    }
+                    ev.prevent_default();
+                    return;
+                }
+                "Escape" | "/" => {
+                    slash_menu_state.set(None);
+                    ev.prevent_default();
+                    return;
+                }
+                _ => {
+                    slash_menu_state.set(None);
+                }
+            }
+        }
+
+        // ── Slash menu trigger: "/" on empty block ──────────────────────
+        if show_slash_menu && key == "/" && !ctrl && !shift && slash_item_count > 0
+            && editor_ref.get().is_some() {
+                let Ok(ds) = doc_key.lock() else { return };
+                let pos = ds.selection().head;
+                let resolved = ds.doc().resolve(pos);
+                if resolved.parent().node_type.is_textblock()
+                    && resolved.parent().content.size() == 0
+                {
+                    let Some(window) = web_sys::window() else { return };
+                    let Some(sel) = window.get_selection().ok().flatten() else { return };
+                    let trigger = sel.focus_node()
+                        .and_then(|n| n.dyn_ref::<web_sys::Element>().cloned()
+                            .or_else(|| n.parent_element()));
+                    if let Some(el) = trigger {
+                        *slash_trigger_el.borrow_mut() = Some(el.clone());
+                        drop(ds);
+                        slash_menu_index.set(0);
+                        slash_menu_state.set(compute_slash_menu_pos(&el));
+                        ev.prevent_default();
+                        return;
+                    }
+                    drop(ds);
+                }
+            }
 
         // Undo/Redo
         match key.as_str() {
@@ -1211,6 +1329,7 @@ pub fn TreeWysiwygEditor(
         let editor_selchange = editor_ref;
         let extensions_for_effectchange = Arc::clone(&extensions);
         let kd_handled_selchange = keydown_handled.clone();
+        let mouse_selecting_selchange = mouse_selecting.clone();
         let selchange_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
             if composing.get_untracked() {
                 return;
@@ -1264,6 +1383,25 @@ pub fn TreeWysiwygEditor(
                 extension_active_state.set(states);
             }
             formatting_state.set(fmt);
+
+            if mouse_selecting_selchange.get() {
+                return;
+            }
+
+            if show_floating_toolbar && !sel.is_collapsed() && sel.range_count() > 0 {
+                if let Ok(range) = sel.get_range_at(0) {
+                    let range_rect = range.get_bounding_client_rect();
+                    let parent = container_el.parent_element();
+                    let parent_rect = parent.as_ref()
+                        .map(|p| p.get_bounding_client_rect())
+                        .unwrap_or_else(|| container_el.get_bounding_client_rect());
+
+                    let top = range_rect.top() - parent_rect.top() - 8.0;
+                    floating_pos.set(Some(top));
+                }
+            } else {
+                floating_pos.set(None);
+            }
         });
 
         // Attach selectionchange to the document (it doesn't fire on individual elements).
@@ -1287,8 +1425,83 @@ pub fn TreeWysiwygEditor(
         });
     }
 
+    // ── Mouse selection tracking for floating toolbar ──────────────────────
+    if show_floating_toolbar {
+        let mouse_selecting_down = mouse_selecting.clone();
+        let mouse_selecting_up = mouse_selecting.clone();
+        let editor_mousedown = editor_ref;
+        let editor_mouseup = editor_ref;
+
+        let mousedown_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            let Some(container) = editor_mousedown.get() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+            let Some(target) = ev.target() else { return };
+            let Some(target_node) = target.dyn_ref::<web_sys::Node>() else { return };
+            if !container_el.contains(Some(target_node)) {
+                return;
+            }
+            mouse_selecting_down.set(true);
+            floating_pos.set(None);
+        });
+
+        let mouseup_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_ev: web_sys::Event| {
+            if !mouse_selecting_up.get() {
+                return;
+            }
+            mouse_selecting_up.set(false);
+
+            let Some(container) = editor_mouseup.get() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+            let Some(window) = web_sys::window() else { return };
+            let Some(sel) = window.get_selection().ok().flatten() else { return };
+
+            if sel.is_collapsed() || sel.range_count() == 0 {
+                return;
+            }
+            let Some(focus_node) = sel.focus_node() else { return };
+            if !container_el.contains(Some(&focus_node)) {
+                return;
+            }
+
+            if let Ok(range) = sel.get_range_at(0) {
+                let range_rect = range.get_bounding_client_rect();
+                let parent = container_el.parent_element();
+                let parent_rect = parent.as_ref()
+                    .map(|p| p.get_bounding_client_rect())
+                    .unwrap_or_else(|| container_el.get_bounding_client_rect());
+
+                let top = range_rect.top() - parent_rect.top() - 8.0;
+                floating_pos.set(Some(top));
+            }
+        });
+
+        if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+            let _ = document.add_event_listener_with_callback(
+                "mousedown",
+                mousedown_cb.as_ref().unchecked_ref(),
+            );
+            let _ = document.add_event_listener_with_callback(
+                "mouseup",
+                mouseup_cb.as_ref().unchecked_ref(),
+            );
+        }
+
+        let mousedown_fn: js_sys::Function = mousedown_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        let mouseup_fn: js_sys::Function = mouseup_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        let mousedown_cb = send_wrapper::SendWrapper::new(mousedown_cb);
+        let mouseup_cb = send_wrapper::SendWrapper::new(mouseup_cb);
+        on_cleanup(move || {
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                let _ = document.remove_event_listener_with_callback("mousedown", &mousedown_fn);
+                let _ = document.remove_event_listener_with_callback("mouseup", &mouseup_fn);
+            }
+            drop(mousedown_cb);
+            drop(mouseup_cb);
+        });
+    }
+
     // ── Toolbar ───────────────────────────────────────────────────────────
-    let toolbar_view = if show_toolbar {
+    let toolbar_view = if show_fixed_toolbar {
         let items = toolbar_items.unwrap_or_else(|| {
             let mut items = default_toolbar_items();
             for ext_item in extension_toolbar_items {
@@ -1298,189 +1511,99 @@ pub fn TreeWysiwygEditor(
             items
         });
 
-        let mut toolbar_views: Vec<AnyView> = Vec::new();
-
-        for item in items {
-            match item {
-                ToolbarItem::Separator => {
-                    toolbar_views.push(
-                        view! { <div class="kode-toolbar-separator" /> }.into_any()
-                    );
-                }
-                ToolbarItem::Spacer => {
-                    toolbar_views.push(
-                        view! { <div class="kode-toolbar-spacer" /> }.into_any()
-                    );
-                }
-                ToolbarItem::Slot(slot_view) => {
-                    toolbar_views.push(slot_view);
-                }
-                ToolbarItem::Builtin(btn) => {
-                    let doc_tb = doc_state.clone();
-                    let notify_tb = notify.clone();
-                    let editor_ref_tb = editor_ref;
-                    let label = btn.label();
-                    let title = btn.title();
-
-                    let active = Signal::derive(move || {
-                        btn.is_active(&formatting_state.get())
-                    });
-
-                    let class = Signal::derive(move || {
-                        if active.get() {
-                            "kode-toolbar-button active".to_string()
-                        } else {
-                            "kode-toolbar-button".to_string()
-                        }
-                    });
-
-                    let on_click = move |_: MouseEvent| {
-                        let Ok(mut ds) = doc_tb.lock() else { return };
-                        dispatch_builtin_action(&mut ds, btn);
-                        let md = ds.to_markdown();
-                        drop(ds);
-                        (notify_tb)(Some(md));
-                        // Re-focus the contenteditable div.
-                        if let Some(el) = editor_ref_tb.get() {
-                            let el: &HtmlElement = el.as_ref();
-                            let _ = el.focus();
-                        }
-                    };
-
-                    toolbar_views.push(
-                        view! {
-                            <button
-                                title=title
-                                class=class
-                                on:click=on_click
-                                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
-                            >
-                                {label}
-                            </button>
-                        }.into_any(),
-                    );
-                }
-                ToolbarItem::BuiltinWithView(btn, custom_view) => {
-                    let doc_tb = doc_state.clone();
-                    let notify_tb = notify.clone();
-                    let editor_ref_tb = editor_ref;
-                    let title = btn.title();
-
-                    let active = Signal::derive(move || {
-                        btn.is_active(&formatting_state.get())
-                    });
-
-                    let class = Signal::derive(move || {
-                        if active.get() {
-                            "kode-toolbar-button active".to_string()
-                        } else {
-                            "kode-toolbar-button".to_string()
-                        }
-                    });
-
-                    let on_click = move |_: MouseEvent| {
-                        let Ok(mut ds) = doc_tb.lock() else { return };
-                        dispatch_builtin_action(&mut ds, btn);
-                        let md = ds.to_markdown();
-                        drop(ds);
-                        (notify_tb)(Some(md));
-                        if let Some(el) = editor_ref_tb.get() {
-                            let el: &HtmlElement = el.as_ref();
-                            let _ = el.focus();
-                        }
-                    };
-
-                    toolbar_views.push(
-                        view! {
-                            <button
-                                title=title
-                                class=class
-                                on:click=on_click
-                                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
-                            >
-                                {custom_view}
-                            </button>
-                        }.into_any(),
-                    );
-                }
-                ToolbarItem::Custom(custom) => {
-                    let on_click = custom.on_click;
-                    let title = custom.title;
-                    let btn_class = custom.class.unwrap_or_else(|| "kode-toolbar-button".to_string());
-
-                    toolbar_views.push(
-                        view! {
-                            <button
-                                title=title
-                                class=btn_class
-                                on:click=move |_: MouseEvent| { (on_click)(); }
-                                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
-                            >
-                                {custom.label}
-                            </button>
-                        }.into_any(),
-                    );
-                }
-                ToolbarItem::ExtensionButton(ext_item) => {
-                    let doc_ext_tb = doc_state.clone();
-                    let notify_ext_tb = notify.clone();
-                    let editor_ref_tb = editor_ref;
-                    let action = ext_item.action;
-                    let title = ext_item.title;
-                    let active_name = ext_item.active_name;
-
-                    let active = Signal::derive(move || {
-                        if let Some(ref name) = active_name {
-                            let states = extension_active_state.get();
-                            states.iter().any(|(n, a)| n == name && *a)
-                        } else {
-                            false
-                        }
-                    });
-
-                    let class = Signal::derive(move || {
-                        if active.get() {
-                            "kode-toolbar-button active".to_string()
-                        } else {
-                            "kode-toolbar-button".to_string()
-                        }
-                    });
-
-                    let on_click = move |_: MouseEvent| {
-                        let Ok(mut ds) = doc_ext_tb.lock() else { return };
-                        let changed = apply_md_command(&mut ds, |e| { (action)(e); });
-                        if changed {
-                            let md_out = ds.to_markdown();
-                            drop(ds);
-                            (notify_ext_tb)(Some(md_out));
-                        } else {
-                            drop(ds);
-                        }
-                        if let Some(el) = editor_ref_tb.get() {
-                            let el: &HtmlElement = el.as_ref();
-                            let _ = el.focus();
-                        }
-                    };
-
-                    toolbar_views.push(
-                        view! {
-                            <button
-                                title=title
-                                class=class
-                                on:click=on_click
-                                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
-                            >
-                                {ext_item.label}
-                            </button>
-                        }.into_any(),
-                    );
-                }
-            }
-        }
+        let toolbar_views = render_toolbar_items(
+            items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
+        );
 
         Some(view! {
             <div class="kode-toolbar">
                 {toolbar_views}
+            </div>
+        }.into_any())
+    } else {
+        None
+    };
+
+    // ── Floating toolbar ────────────────────────────────────────────────
+    let floating_toolbar_view = if show_floating_toolbar {
+        let items = floating_toolbar_items.unwrap_or_else(default_toolbar_items);
+        let toolbar_views = render_toolbar_items(
+            items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
+        );
+        Some(view! {
+            <div class="kode-floating-toolbar"
+                style=move || {
+                    match floating_pos.get() {
+                        Some(top) => format!("display:flex;top:{top}px;"),
+                        None => "display:none;".to_string(),
+                    }
+                }
+                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                {toolbar_views}
+            </div>
+        }.into_any())
+    } else {
+        None
+    };
+
+    // ── Slash menu view ───────────────────────────────────────────────
+    let slash_menu_view = if show_slash_menu && !slash_menu_items.is_empty() {
+        let menu_items_view: Vec<AnyView> = slash_menu_items.iter().enumerate().map(|(i, item)| {
+            let (icon, name, desc) = match item {
+                SlashMenuItem::Builtin { button, label, description } => (button.label().to_string(), label.to_string(), description.to_string()),
+                SlashMenuItem::Extension { label, description, .. } => (label.clone(), label.clone(), description.clone()),
+            };
+            let doc_click = doc_state.clone();
+            let notify_click = notify.clone();
+            let items_click = Arc::clone(&slash_menu_items);
+            let ext_actions_click = Arc::clone(&ext_actions);
+            let on_click = move |_: MouseEvent| {
+                slash_menu_state.set(None);
+                let Ok(mut ds) = doc_click.lock() else { return };
+                match &items_click[i] {
+                    SlashMenuItem::Builtin { button, .. } => {
+                        dispatch_builtin_action(&mut ds, *button);
+                    }
+                    SlashMenuItem::Extension { ext_index, .. } => {
+                        if let Some(action) = ext_actions_click.get(*ext_index) {
+                            apply_md_command(&mut ds, |e| { (action)(e); });
+                        } else {
+                            drop(ds);
+                            return;
+                        }
+                    }
+                }
+                let md = ds.to_markdown();
+                drop(ds);
+                (notify_click)(Some(md));
+            };
+            view! {
+                <div class=move || {
+                        if slash_menu_index.get() == i { "kode-slash-menu-item selected" }
+                        else { "kode-slash-menu-item" }
+                    }
+                    on:click=on_click
+                    on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                    <span class="kode-slash-menu-item-icon">{icon.clone()}</span>
+                    <span class="kode-slash-menu-item-name">{name.clone()}</span>
+                    <span class="kode-slash-menu-item-desc">{desc.clone()}</span>
+                </div>
+            }.into_any()
+        }).collect();
+
+        Some(view! {
+            <div class="kode-slash-menu"
+                style=move || {
+                    match slash_menu_state.get() {
+                        Some((top, max_h, left, flip)) => {
+                            let transform = if flip { "transform:translateY(-100%);" } else { "" };
+                            format!("display:block;top:{top}px;left:{left}px;max-height:{max_h}px;{transform}")
+                        }
+                        None => "display:none;".to_string(),
+                    }
+                }
+                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                {menu_items_view}
             </div>
         }.into_any())
     } else {
@@ -1568,16 +1691,185 @@ pub fn TreeWysiwygEditor(
 
             <div
                 node_ref=editor_ref
-                class="wysiwyg-scroll-container tree-wysiwyg-scroll-container"
+                class=if show_slash_menu { "wysiwyg-scroll-container tree-wysiwyg-scroll-container kode-slash-enabled" } else { "wysiwyg-scroll-container tree-wysiwyg-scroll-container" }
                 contenteditable="true"
                 spellcheck="false"
                 on:keydown=on_keydown
                 on:mousedown=on_mousedown
+                on:scroll={
+                    let slash_trigger_scroll = slash_trigger_for_scroll.clone();
+                    move |_| {
+                        if slash_menu_state.get_untracked().is_none() { return; }
+                        let trigger = slash_trigger_scroll.borrow();
+                        if let Some(el) = trigger.as_ref() {
+                            let rect = el.get_bounding_client_rect();
+                            let Some(window) = web_sys::window() else { return };
+                            let vh = window.inner_height()
+                                .ok().and_then(|v| v.as_f64()).unwrap_or(800.0);
+                            if rect.bottom() < 0.0 || rect.top() > vh {
+                                slash_menu_state.set(None);
+                            } else {
+                                slash_menu_state.set(compute_slash_menu_pos(el));
+                            }
+                        }
+                    }
+                }
                 on:compositionstart=on_composition_start
                 on:compositionend=on_composition_end
             />
+
+            {floating_toolbar_view}
+            {slash_menu_view}
         </div>
     }
+}
+
+fn compute_slash_menu_pos(el: &web_sys::Element) -> Option<(f64, f64, f64, bool)> {
+    let el_rect = el.get_bounding_client_rect();
+    let window = web_sys::window()?;
+    let vh = window.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(800.0);
+    let gap = 4.0;
+    let pad = 8.0;
+    let space_below = vh - el_rect.bottom() - pad;
+    let space_above = el_rect.top() - pad;
+    let flip = space_below < 200.0 && space_above > space_below;
+    let (top, max_h) = if flip {
+        (el_rect.top() - gap, space_above - gap)
+    } else {
+        (el_rect.bottom() + gap, space_below - gap)
+    };
+    Some((top, max_h.max(100.0), el_rect.left(), flip))
+}
+
+fn render_toolbar_items(
+    items: Vec<ToolbarItem>,
+    doc_state: &Arc<Mutex<DocState>>,
+    notify: &(impl Fn(Option<String>) + Clone + 'static),
+    editor_ref: NodeRef<leptos::html::Div>,
+    formatting_state: RwSignal<FormattingState>,
+    extension_active_state: RwSignal<Vec<(String, bool)>>,
+) -> Vec<AnyView> {
+    let mut views: Vec<AnyView> = Vec::new();
+    for item in items {
+        match item {
+            ToolbarItem::Separator => {
+                views.push(view! { <div class="kode-toolbar-separator" /> }.into_any());
+            }
+            ToolbarItem::Spacer => {
+                views.push(view! { <div class="kode-toolbar-spacer" /> }.into_any());
+            }
+            ToolbarItem::Slot(slot_view) => {
+                views.push(slot_view);
+            }
+            ToolbarItem::Builtin(btn) => {
+                let doc_tb = doc_state.clone();
+                let notify_tb = notify.clone();
+                let editor_ref_tb = editor_ref;
+                let label = btn.label();
+                let title = btn.title();
+                let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
+                let class = Signal::derive(move || {
+                    if active.get() { "kode-toolbar-button active".to_string() }
+                    else { "kode-toolbar-button".to_string() }
+                });
+                let on_click = move |_: MouseEvent| {
+                    let Ok(mut ds) = doc_tb.lock() else { return };
+                    dispatch_builtin_action(&mut ds, btn);
+                    let md = ds.to_markdown();
+                    drop(ds);
+                    (notify_tb)(Some(md));
+                    if let Some(el) = editor_ref_tb.get() {
+                        let el: &HtmlElement = el.as_ref();
+                        let _ = el.focus();
+                    }
+                };
+                views.push(view! {
+                    <button title=title class=class on:click=on_click
+                        on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                        {label}
+                    </button>
+                }.into_any());
+            }
+            ToolbarItem::BuiltinWithView(btn, custom_view) => {
+                let doc_tb = doc_state.clone();
+                let notify_tb = notify.clone();
+                let editor_ref_tb = editor_ref;
+                let title = btn.title();
+                let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
+                let class = Signal::derive(move || {
+                    if active.get() { "kode-toolbar-button active".to_string() }
+                    else { "kode-toolbar-button".to_string() }
+                });
+                let on_click = move |_: MouseEvent| {
+                    let Ok(mut ds) = doc_tb.lock() else { return };
+                    dispatch_builtin_action(&mut ds, btn);
+                    let md = ds.to_markdown();
+                    drop(ds);
+                    (notify_tb)(Some(md));
+                    if let Some(el) = editor_ref_tb.get() {
+                        let el: &HtmlElement = el.as_ref();
+                        let _ = el.focus();
+                    }
+                };
+                views.push(view! {
+                    <button title=title class=class on:click=on_click
+                        on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                        {custom_view}
+                    </button>
+                }.into_any());
+            }
+            ToolbarItem::Custom(custom) => {
+                let on_click = custom.on_click;
+                let title = custom.title;
+                let btn_class = custom.class.unwrap_or_else(|| "kode-toolbar-button".to_string());
+                views.push(view! {
+                    <button title=title class=btn_class
+                        on:click=move |_: MouseEvent| { (on_click)(); }
+                        on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                        {custom.label}
+                    </button>
+                }.into_any());
+            }
+            ToolbarItem::ExtensionButton(ext_item) => {
+                let doc_ext_tb = doc_state.clone();
+                let notify_ext_tb = notify.clone();
+                let editor_ref_tb = editor_ref;
+                let action = ext_item.action;
+                let title = ext_item.title;
+                let active_name = ext_item.active_name;
+                let active = Signal::derive(move || {
+                    if let Some(ref name) = active_name {
+                        let states = extension_active_state.get();
+                        states.iter().any(|(n, a)| n == name && *a)
+                    } else { false }
+                });
+                let class = Signal::derive(move || {
+                    if active.get() { "kode-toolbar-button active".to_string() }
+                    else { "kode-toolbar-button".to_string() }
+                });
+                let on_click = move |_: MouseEvent| {
+                    let Ok(mut ds) = doc_ext_tb.lock() else { return };
+                    let changed = apply_md_command(&mut ds, |e| { (action)(e); });
+                    if changed {
+                        let md_out = ds.to_markdown();
+                        drop(ds);
+                        (notify_ext_tb)(Some(md_out));
+                    } else { drop(ds); }
+                    if let Some(el) = editor_ref_tb.get() {
+                        let el: &HtmlElement = el.as_ref();
+                        let _ = el.focus();
+                    }
+                };
+                views.push(view! {
+                    <button title=title class=class on:click=on_click
+                        on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                        {ext_item.label}
+                    </button>
+                }.into_any());
+            }
+        }
+    }
+    views
 }
 
 // ── Selection mapping: Browser → DocState ──────────────────────────────────

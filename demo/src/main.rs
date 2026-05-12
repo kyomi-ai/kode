@@ -288,6 +288,7 @@ fn App() -> impl IntoView {
                                     theme=theme
                                     extensions=vec![Arc::new(ChartDemoExtension) as Arc<dyn Extension>]
                                     enable_block_drag=true
+                                    show_floating_toolbar=true
                                 />
                             </div>
                         </div>

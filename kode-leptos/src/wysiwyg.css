@@ -70,6 +70,33 @@
     flex: 1;
 }
 
+/* ── Floating Toolbar ──────────────────────────────────────────────── */
+
+.kode-floating-toolbar {
+    position: absolute;
+    z-index: 20;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: var(--kode-toolbar-gap, 2px);
+    padding: var(--kode-floating-toolbar-padding, 4px 6px);
+    background: var(--kode-floating-toolbar-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border: var(--kode-floating-toolbar-border-width, 1px) solid var(--kode-floating-toolbar-border-color, var(--kode-border));
+    border-radius: var(--kode-floating-toolbar-border-radius, 8px);
+    box-shadow: var(--kode-floating-toolbar-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
+    font-family: var(--kode-toolbar-font-family, var(--kode-font-family, 'JetBrains Mono', 'Fira Code', monospace));
+    font-size: var(--kode-toolbar-font-size, 13px);
+    user-select: none;
+    transform: translate(-50%, -100%);
+    pointer-events: auto;
+    animation: kode-floating-toolbar-in 0.12s ease-out;
+}
+
+@keyframes kode-floating-toolbar-in {
+    from { opacity: 0; transform: translate(-50%, -100%) translateY(4px); }
+    to   { opacity: 1; transform: translate(-50%, -100%) translateY(0); }
+}
+
 /* ── WYSIWYG Block Renderer Styles ─────────────────────────────────── */
 
 /* Container */
@@ -480,6 +507,15 @@ div.wysiwyg-code-block code {
     min-height: 1.4em;
 }
 
+/* Placeholder on empty paragraphs (only when slash menu is enabled) */
+.kode-slash-enabled p:empty::before {
+    content: var(--kode-placeholder-text, "Type / for commands");
+    color: var(--kode-placeholder-color, var(--kode-fg-dim));
+    opacity: var(--kode-placeholder-opacity, 0.5);
+    pointer-events: none;
+    font-style: var(--kode-placeholder-font-style, normal);
+}
+
 /* ── Tables ────────────────────────────────────────────────────────── */
 
 .wysiwyg-table {
@@ -664,6 +700,69 @@ body.kode-dragging {
 
 body.kode-dragging * {
     cursor: grabbing !important;
+}
+
+/* ── Slash Command Menu ────────────────────────────────────────────── */
+
+.kode-slash-menu {
+    position: fixed;
+    z-index: 2147483646;
+    min-width: var(--kode-slash-menu-min-width, 220px);
+    overflow-y: auto;
+    background: var(--kode-slash-menu-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border: var(--kode-slash-menu-border-width, 1px) solid var(--kode-slash-menu-border-color, var(--kode-border));
+    border-radius: var(--kode-slash-menu-border-radius, 8px);
+    box-shadow: var(--kode-slash-menu-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
+    padding: var(--kode-slash-menu-padding, 4px);
+    font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    font-size: var(--kode-slash-menu-font-size, 13px);
+    animation: kode-slash-menu-in 0.1s ease-out;
+}
+
+@keyframes kode-slash-menu-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.kode-slash-menu-item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--kode-slash-menu-item-gap, 8px);
+    padding: var(--kode-slash-menu-item-padding, 6px 10px);
+    border-radius: var(--kode-slash-menu-item-border-radius, 4px);
+    cursor: pointer;
+    transition: background 0.1s ease;
+    white-space: nowrap;
+}
+
+.kode-slash-menu-item:hover,
+.kode-slash-menu-item.selected {
+    background: var(--kode-slash-menu-item-selected-bg, var(--kode-bg-hover));
+}
+
+.kode-slash-menu-item-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--kode-slash-menu-icon-size, 28px);
+    height: var(--kode-slash-menu-icon-size, 28px);
+    border-radius: var(--kode-toolbar-button-border-radius, 4px);
+    background: var(--kode-slash-menu-icon-bg, var(--kode-bg-highlight));
+    color: var(--kode-fg);
+    font-family: var(--kode-toolbar-font-family, var(--kode-font-family, 'JetBrains Mono', 'Fira Code', monospace));
+    font-size: var(--kode-toolbar-button-font-size, 13px);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.kode-slash-menu-item-name {
+    font-weight: 500;
+    color: var(--kode-slash-menu-item-name-color, var(--kode-fg-bright));
+}
+
+.kode-slash-menu-item-desc {
+    color: var(--kode-slash-menu-item-desc-color, var(--kode-fg-dim));
+    margin-left: auto;
 }
 
 /* .kode-text-segment — wrapper div for text blocks in segment-based rendering.
