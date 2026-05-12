@@ -1549,9 +1549,16 @@ pub fn TreeWysiwygEditor(
     // ── Slash menu view ───────────────────────────────────────────────
     let slash_menu_view = if show_slash_menu && !slash_menu_items.is_empty() {
         let menu_items_view: Vec<AnyView> = slash_menu_items.iter().enumerate().map(|(i, item)| {
-            let (icon, name, desc) = match item {
-                SlashMenuItem::Builtin { button, label, description } => (button.label().to_string(), label.to_string(), description.to_string()),
-                SlashMenuItem::Extension { label, description, .. } => (label.clone(), label.clone(), description.clone()),
+            let (icon_svg, icon_text, name, desc) = match item {
+                SlashMenuItem::Builtin { button, label, description } => (
+                    button.icon_svg().map(|s| s.to_string()),
+                    button.label().to_string(),
+                    label.to_string(),
+                    description.to_string(),
+                ),
+                SlashMenuItem::Extension { label, description, .. } => (
+                    None, label.clone(), label.clone(), description.clone(),
+                ),
             };
             let doc_click = doc_state.clone();
             let notify_click = notify.clone();
@@ -1584,7 +1591,11 @@ pub fn TreeWysiwygEditor(
                     }
                     on:click=on_click
                     on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
-                    <span class="kode-slash-menu-item-icon">{icon.clone()}</span>
+                    {if let Some(ref svg) = icon_svg {
+                        view! { <span class="kode-slash-menu-item-icon" inner_html=svg.clone() /> }.into_any()
+                    } else {
+                        view! { <span class="kode-slash-menu-item-icon">{icon_text.clone()}</span> }.into_any()
+                    }}
                     <span class="kode-slash-menu-item-name">{name.clone()}</span>
                     <span class="kode-slash-menu-item-desc">{desc.clone()}</span>
                 </div>
@@ -1765,7 +1776,6 @@ fn render_toolbar_items(
                 let doc_tb = doc_state.clone();
                 let notify_tb = notify.clone();
                 let editor_ref_tb = editor_ref;
-                let label = btn.label();
                 let title = btn.title();
                 let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
                 let class = Signal::derive(move || {
@@ -1783,12 +1793,21 @@ fn render_toolbar_items(
                         let _ = el.focus();
                     }
                 };
-                views.push(view! {
-                    <button title=title class=class on:click=on_click
-                        on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
-                        {label}
-                    </button>
-                }.into_any());
+                if let Some(svg) = btn.icon_svg() {
+                    views.push(view! {
+                        <button title=title class=class on:click=on_click
+                            on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
+                            inner_html=svg />
+                    }.into_any());
+                } else {
+                    let label = btn.label();
+                    views.push(view! {
+                        <button title=title class=class on:click=on_click
+                            on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                            {label}
+                        </button>
+                    }.into_any());
+                }
             }
             ToolbarItem::BuiltinWithView(btn, custom_view) => {
                 let doc_tb = doc_state.clone();

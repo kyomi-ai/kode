@@ -58,6 +58,12 @@
     border-color: var(--kode-toolbar-button-selected-border, var(--kode-accent));
 }
 
+.kode-toolbar-button svg {
+    width: var(--kode-toolbar-icon-size, 16px);
+    height: var(--kode-toolbar-icon-size, 16px);
+    flex-shrink: 0;
+}
+
 .kode-toolbar-separator {
     width: var(--kode-toolbar-separator-width, 1px);
     height: var(--kode-toolbar-separator-height, 20px);
@@ -753,6 +759,11 @@ body.kode-dragging * {
     font-size: var(--kode-toolbar-button-font-size, 13px);
     font-weight: 500;
     flex-shrink: 0;
+}
+
+.kode-slash-menu-item-icon svg {
+    width: var(--kode-slash-menu-icon-svg-size, 16px);
+    height: var(--kode-slash-menu-icon-svg-size, 16px);
 }
 
 .kode-slash-menu-item-name {
