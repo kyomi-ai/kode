@@ -219,10 +219,15 @@ pub(crate) fn render_block_node(
                 .map(|line| highlight::highlight_line(line, &highlight_lang))
                 .collect();
             let mut code_html = highlighted_lines.join("\n");
-            // A trailing \n in <pre> doesn't render a visible blank line
-            // in HTML — the browser collapses it. Append an extra \n so
-            // the last empty line is visible and the block expands.
+            // lines() strips the trailing \n. Restore it, then add one
+            // MORE: browsers collapse a single trailing \n in <pre>, so
+            // two are needed for the empty line to be visible and for the
+            // cursor to land there.
             if content_text.ends_with('\n') {
+                code_html.push_str("\n\n");
+            }
+            // Empty code blocks need a \n so the <pre> doesn't collapse.
+            if code_html.is_empty() {
                 code_html.push('\n');
             }
 
@@ -906,6 +911,9 @@ fn block_node_to_html(
                     .collect();
                 let mut code_html = highlighted_lines.join("\n");
                 if content_text.ends_with('\n') {
+                    code_html.push_str("\n\n");
+                }
+                if code_html.is_empty() {
                     code_html.push('\n');
                 }
 
@@ -1593,6 +1601,58 @@ mod tests {
         assert!(html.contains("<code>"));
         assert!(!html.contains("contenteditable=\"false\""));
         assert!(!html.contains("kode-extension-block"));
+    }
+
+    #[test]
+    fn doc_to_html_code_block_trailing_newline_renders_visible_empty_line() {
+        // After pressing Enter at the end of a line in a code block, the
+        // content becomes "hello\n". The rendered HTML must have TWO trailing
+        // newlines — one from the content, one extra — because browsers
+        // collapse a single trailing \n in <pre>. Without the extra \n,
+        // the new line is invisible and the cursor stays on the old line.
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs(""),
+            Fragment::from_node(Node::new_text("hello\n")),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let html = doc_to_html(&doc, &[], &[]);
+
+        // Extract the content between <code> and </code>.
+        let code_start = html.find("<code>").unwrap() + "<code>".len();
+        let code_end = html.find("</code>").unwrap();
+        let code_content = &html[code_start..code_end];
+
+        // The rendered code content must end with \n\n (not just \n).
+        assert!(
+            code_content.ends_with("\n\n"),
+            "code block with trailing newline must render \\n\\n for visibility, got: {:?}",
+            code_content
+        );
+    }
+
+    #[test]
+    fn doc_to_html_code_block_empty_has_placeholder_newline() {
+        // An empty code block should still render with a newline so the
+        // <pre> has visible height for the cursor to land on.
+        let code = Node::branch_with_attrs(
+            NodeType::CodeBlock,
+            code_block_attrs(""),
+            Fragment::empty(),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(code));
+        let html = doc_to_html(&doc, &[], &[]);
+
+        let code_start = html.find("<code>").unwrap() + "<code>".len();
+        let code_end = html.find("</code>").unwrap();
+        let code_content = &html[code_start..code_end];
+
+        // Empty code block should have at least a \n so the <pre> doesn't collapse.
+        assert!(
+            code_content.contains('\n'),
+            "empty code block should render a placeholder newline, got: {:?}",
+            code_content
+        );
     }
 
     #[test]

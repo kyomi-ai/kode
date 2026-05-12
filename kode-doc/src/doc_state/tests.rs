@@ -1458,6 +1458,31 @@ mod clipboard_tests {
     }
 
     #[test]
+    fn split_block_in_code_block_inserts_newline_and_advances_cursor() {
+        // Parser includes trailing \n, so content is "hello\n" (6 chars).
+        let mut state = DocState::from_markdown("```\nhello\n```");
+        let initial_content = state.doc.child(0).text_content();
+
+        // Cursor at position 6 = at the trailing \n (after "hello").
+        state.set_selection(Selection::cursor(6));
+        state.split_block();
+
+        let cb = state.doc.child(0);
+        assert_eq!(cb.node_type, NodeType::CodeBlock);
+        // A new \n is inserted before the existing trailing \n.
+        assert_eq!(
+            cb.text_content(),
+            format!("{}{}", &initial_content[..initial_content.len() - 1], "\n\n"),
+        );
+
+        // Cursor must advance past the inserted newline.
+        assert_eq!(
+            state.selection().head, 7,
+            "cursor should advance past the newline to the new line"
+        );
+    }
+
+    #[test]
     fn insert_text_multiline_in_list_item() {
         let mut state = DocState::from_markdown("- Item 1");
         // Place cursor at end of "Item 1"
