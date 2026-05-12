@@ -779,6 +779,50 @@ mod main_tests {
     }
 
     #[test]
+    fn toggle_bullet_list_roundtrip_multi_item() {
+        // Build: <doc><p>Hello</p><p>World</p></doc>
+        let mut state = DocState::from_doc(two_para_doc());
+
+        // Select across both paragraphs and toggle bullet list ON.
+        // Positions: 0(doc) 1(p) H(2) e(3) l(4) l(5) o(6) 7(/p) 8(p) W(9) ...
+        state.set_selection(Selection::range(2, 9));
+        state.toggle_bullet_list();
+
+        // Should be: <doc><ul><li><p>Hello</p></li><li><p>World</p></li></ul></doc>
+        assert_eq!(state.doc.child_count(), 1);
+        let ul = state.doc.child(0);
+        assert_eq!(ul.node_type, NodeType::BulletList);
+        assert_eq!(ul.child_count(), 2);
+        assert_eq!(ul.child(0).child(0).text_content(), "Hello");
+        assert_eq!(ul.child(1).child(0).text_content(), "World");
+
+        // Toggle bullet list OFF — should produce two plain paragraphs.
+        state.toggle_bullet_list();
+        assert!(!state.is_in_node(NodeType::BulletList));
+        assert!(!state.is_in_node(NodeType::ListItem));
+        assert_eq!(
+            state.doc.child_count(),
+            2,
+            "After lift, doc should have 2 paragraphs but got: {:#?}",
+            state.doc
+        );
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hello");
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "World");
+
+        // Select across both paragraphs, then toggle bullet list ON again.
+        state.set_selection(Selection::range(2, 9));
+        state.toggle_bullet_list();
+        assert_eq!(state.doc.child_count(), 1);
+        let ul2 = state.doc.child(0);
+        assert_eq!(ul2.node_type, NodeType::BulletList);
+        assert_eq!(ul2.child_count(), 2);
+        assert_eq!(ul2.child(0).child(0).text_content(), "Hello");
+        assert_eq!(ul2.child(1).child(0).text_content(), "World");
+    }
+
+    #[test]
     fn toggle_bullet_to_ordered_list() {
         let mut state = DocState::from_doc(simple_doc());
         state.set_selection(Selection::cursor(3));

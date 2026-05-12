@@ -152,29 +152,48 @@ impl DocState {
         }
 
         match (current_list_depth, current_list_type) {
-            (Some(_depth), Some(lt)) if lt == target_list_type => {
-                // Already in the target list type — lift out of list.
-                // Strategy: lift the list wrapper first, then lift the ListItem wrapper.
+            (Some(depth), Some(lt)) if lt == target_list_type => {
+                // Already in the target list type — flatten the entire list,
+                // removing both the list wrapper and all ListItem wrappers.
                 self.push_undo();
-                let mut tr = Transform::new(self.doc.clone());
-                if tr.lift(from, target_list_type).is_ok() {
-                    // After lifting the list wrapper, the ListItem is now directly
-                    // in the doc. The list's opening token has been removed, so
-                    // every position inside shifts left by 1. `from.saturating_sub(1)`
-                    // reliably points inside the (now unwrapped) ListItem because
-                    // the original `from` was: list_open + list_item_open + para_open + …,
-                    // and removing the list_open token makes it land inside the ListItem.
-                    let inner_pos = from.saturating_sub(1);
-                    if tr.lift(inner_pos, NodeType::ListItem).is_ok() {
-                        // Removed 2 wrappers total (list + list item = 2 open tokens).
-                        let new_anchor = self.selection.anchor.saturating_sub(2);
-                        let new_head = self.selection.head.saturating_sub(2);
-                        self.doc = tr.doc;
-                        let max = self.doc.content.size();
-                        self.selection =
-                            Selection::range(new_anchor.min(max), new_head.min(max));
-                        self.redo_stack.clear();
+                let list_node = resolved.node(depth);
+                let list_start = resolved.before(depth);
+                let list_end = resolved.after(depth);
+
+                let mut inner_blocks = Vec::new();
+                for list_item in list_node.content.iter() {
+                    for child in list_item.content.iter() {
+                        inner_blocks.push(child.clone());
                     }
+                }
+
+                let content = Fragment::from_vec(inner_blocks);
+                let slice = Slice::new(content, 0, 0);
+                let mut tr = Transform::new(self.doc.clone());
+                if tr.replace(list_start, list_end, slice).is_ok() {
+                    // A position inside the Kth ListItem (0-indexed) has
+                    // 2 + 2*K wrapper tokens before it that were removed:
+                    // 1 (list open) + 1 (li_K open) + 2*K (close+open per preceding item).
+                    let anchor_item = self
+                        .doc
+                        .resolve(self.selection.anchor.min(self.doc.content.size()))
+                        .index(depth);
+                    let head_item = if self.selection.head == self.selection.anchor {
+                        anchor_item
+                    } else {
+                        self.doc
+                            .resolve(self.selection.head.min(self.doc.content.size()))
+                            .index(depth)
+                    };
+                    let new_anchor =
+                        self.selection.anchor.saturating_sub(2 + 2 * anchor_item);
+                    let new_head =
+                        self.selection.head.saturating_sub(2 + 2 * head_item);
+                    self.doc = tr.doc;
+                    let max = self.doc.content.size();
+                    self.selection =
+                        Selection::range(new_anchor.min(max), new_head.min(max));
+                    self.redo_stack.clear();
                 }
             }
             (Some(depth), Some(_other_list_type)) => {
