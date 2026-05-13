@@ -377,6 +377,11 @@ fn render_list_item_content(
                 let child_content_end = child_content_start + child.content.size();
                 // Render paragraph content inline (as <span>) inside list items
                 let inline_html = render_inline_content(&child.content);
+                let inline_html = if inline_html.is_empty() {
+                    "<br>".to_string()
+                } else {
+                    inline_html
+                };
                 parts.push(
                     view! {
                         <span data-pos-start=child_content_start
@@ -394,6 +399,17 @@ fn render_list_item_content(
             }
         }
         pos += child.node_size();
+    }
+
+    if parts.is_empty() {
+        parts.push(
+            view! {
+                <span data-pos-start=content_start
+                      data-pos-end=content_start
+                      inner_html="<br>" />
+            }
+            .into_any(),
+        );
     }
 
     parts
@@ -1036,6 +1052,11 @@ fn list_item_content_to_html(
                 let child_content_start = pos + 1;
                 let child_content_end = child_content_start + child.content.size();
                 let inline = render_inline_content(&child.content);
+                let inline = if inline.is_empty() {
+                    "<br>".to_string()
+                } else {
+                    inline
+                };
                 html.push_str(&format!(
                     "<span data-pos-start=\"{}\" data-pos-end=\"{}\">{}</span>",
                     child_content_start, child_content_end, inline
@@ -1046,6 +1067,13 @@ fn list_item_content_to_html(
             }
         }
         pos += child.node_size();
+    }
+
+    if html.is_empty() {
+        html.push_str(&format!(
+            "<span data-pos-start=\"{}\" data-pos-end=\"{}\">{}</span>",
+            content_start, content_start, "<br>"
+        ));
     }
 
     html
@@ -1530,6 +1558,119 @@ mod tests {
         assert!(html.contains("wysiwyg-bullet-list"));
         assert!(html.contains("<li"));
         assert!(html.contains("item 1"));
+    }
+
+    #[test]
+    fn doc_to_html_empty_list_item_has_br() {
+        let item = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::empty(),
+            )),
+        );
+        let list = Node::branch(
+            NodeType::BulletList,
+            Fragment::from_node(item),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<br>"), "empty list item should contain <br>, got: {html}");
+    }
+
+    #[test]
+    fn doc_to_html_non_empty_list_item_no_extra_br() {
+        let item = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("hello")),
+            )),
+        );
+        let list = Node::branch(
+            NodeType::BulletList,
+            Fragment::from_node(item),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(!html.contains("<br>"), "non-empty list item should not contain <br>, got: {html}");
+        assert!(html.contains("hello"));
+    }
+
+    #[test]
+    fn doc_to_html_mixed_empty_and_filled_list_items() {
+        let item1 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("first")),
+            )),
+        );
+        let item2 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::empty(),
+            )),
+        );
+        let item3 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("third")),
+            )),
+        );
+        let items = Fragment::from_vec(vec![item1, item2, item3]);
+        let list = Node::branch(NodeType::BulletList, items);
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("first"));
+        assert!(html.contains("third"));
+        assert!(html.contains("<br>"), "empty middle item should contain <br>, got: {html}");
+    }
+
+    #[test]
+    fn doc_to_html_empty_list_item_no_children_has_br() {
+        let item = Node::branch(
+            NodeType::ListItem,
+            Fragment::empty(),
+        );
+        let list = Node::branch(
+            NodeType::BulletList,
+            Fragment::from_node(item),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<br>"), "empty list item (no children) should contain <br>, got: {html}");
+    }
+
+    #[test]
+    fn doc_to_html_mixed_list_with_childless_empty_item() {
+        let item1 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("alpha")),
+            )),
+        );
+        let item2 = Node::branch(
+            NodeType::ListItem,
+            Fragment::empty(),
+        );
+        let item3 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("gamma")),
+            )),
+        );
+        let items = Fragment::from_vec(vec![item1, item2, item3]);
+        let list = Node::branch(NodeType::BulletList, items);
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("alpha"), "first item text missing, got: {html}");
+        assert!(html.contains("gamma"), "third item text missing, got: {html}");
+        assert!(html.contains("<br>"), "childless empty middle item should contain <br>, got: {html}");
     }
 
     #[test]
