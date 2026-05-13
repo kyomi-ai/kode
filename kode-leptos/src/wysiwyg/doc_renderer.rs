@@ -401,6 +401,17 @@ fn render_list_item_content(
         pos += child.node_size();
     }
 
+    if parts.is_empty() {
+        parts.push(
+            view! {
+                <span data-pos-start=content_start
+                      data-pos-end=content_start
+                      inner_html="<br>" />
+            }
+            .into_any(),
+        );
+    }
+
     parts
 }
 
@@ -1058,6 +1069,13 @@ fn list_item_content_to_html(
         pos += child.node_size();
     }
 
+    if html.is_empty() {
+        html.push_str(&format!(
+            "<span data-pos-start=\"{}\" data-pos-end=\"{}\">{}</span>",
+            content_start, content_start, "<br>"
+        ));
+    }
+
     html
 }
 
@@ -1609,6 +1627,50 @@ mod tests {
         assert!(html.contains("first"));
         assert!(html.contains("third"));
         assert!(html.contains("<br>"), "empty middle item should contain <br>, got: {html}");
+    }
+
+    #[test]
+    fn doc_to_html_empty_list_item_no_children_has_br() {
+        let item = Node::branch(
+            NodeType::ListItem,
+            Fragment::empty(),
+        );
+        let list = Node::branch(
+            NodeType::BulletList,
+            Fragment::from_node(item),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("<br>"), "empty list item (no children) should contain <br>, got: {html}");
+    }
+
+    #[test]
+    fn doc_to_html_mixed_list_with_childless_empty_item() {
+        let item1 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("alpha")),
+            )),
+        );
+        let item2 = Node::branch(
+            NodeType::ListItem,
+            Fragment::empty(),
+        );
+        let item3 = Node::branch(
+            NodeType::ListItem,
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("gamma")),
+            )),
+        );
+        let items = Fragment::from_vec(vec![item1, item2, item3]);
+        let list = Node::branch(NodeType::BulletList, items);
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+        let html = doc_to_html(&doc, &[], &[]);
+        assert!(html.contains("alpha"), "first item text missing, got: {html}");
+        assert!(html.contains("gamma"), "third item text missing, got: {html}");
+        assert!(html.contains("<br>"), "childless empty middle item should contain <br>, got: {html}");
     }
 
     #[test]
