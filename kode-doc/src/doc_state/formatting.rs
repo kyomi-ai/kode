@@ -153,46 +153,90 @@ impl DocState {
 
         match (current_list_depth, current_list_type) {
             (Some(depth), Some(lt)) if lt == target_list_type => {
-                // Already in the target list type — flatten the entire list,
-                // removing both the list wrapper and all ListItem wrappers.
+                // Already in the target list type — extract only the current
+                // item from the list, leaving other items intact.
                 self.push_undo();
                 let list_node = resolved.node(depth);
                 let list_start = resolved.before(depth);
                 let list_end = resolved.after(depth);
 
-                let mut inner_blocks = Vec::new();
-                for list_item in list_node.content.iter() {
-                    for child in list_item.content.iter() {
-                        inner_blocks.push(child.clone());
-                    }
+                let item_index = resolved.index(depth);
+                let item_count = list_node.child_count();
+
+                // Extract inner blocks of just the target item.
+                let target_item = list_node.child(item_index);
+                let mut inner_blocks: Vec<Node> = target_item.content.iter().cloned().collect();
+                if inner_blocks.is_empty() {
+                    inner_blocks.push(Node::branch(NodeType::Paragraph, Fragment::empty()));
                 }
 
-                let content = Fragment::from_vec(inner_blocks);
-                let slice = Slice::new(content, 0, 0);
+                let replacement = if item_count == 1 {
+                    // Only item — just extract inner blocks.
+                    Fragment::from_vec(inner_blocks)
+                } else if item_index == 0 {
+                    // First item — inner blocks + remaining list.
+                    let remaining: Vec<Node> = (1..item_count)
+                        .map(|i| list_node.child(i).clone())
+                        .collect();
+                    let new_list = Node::branch_with_attrs(
+                        lt,
+                        list_node.attrs.clone(),
+                        Fragment::from_vec(remaining),
+                    );
+                    let mut nodes = inner_blocks;
+                    nodes.push(new_list);
+                    Fragment::from_vec(nodes)
+                } else if item_index == item_count - 1 {
+                    // Last item — preceding list + inner blocks.
+                    let preceding: Vec<Node> = (0..item_index)
+                        .map(|i| list_node.child(i).clone())
+                        .collect();
+                    let new_list = Node::branch_with_attrs(
+                        lt,
+                        list_node.attrs.clone(),
+                        Fragment::from_vec(preceding),
+                    );
+                    let mut nodes = vec![new_list];
+                    nodes.extend(inner_blocks);
+                    Fragment::from_vec(nodes)
+                } else {
+                    // Middle item — split into two lists with inner blocks between.
+                    let before_items: Vec<Node> = (0..item_index)
+                        .map(|i| list_node.child(i).clone())
+                        .collect();
+                    let after_items: Vec<Node> = ((item_index + 1)..item_count)
+                        .map(|i| list_node.child(i).clone())
+                        .collect();
+                    let list_before = Node::branch_with_attrs(
+                        lt,
+                        list_node.attrs.clone(),
+                        Fragment::from_vec(before_items),
+                    );
+                    let list_after = Node::branch_with_attrs(
+                        lt,
+                        list_node.attrs.clone(),
+                        Fragment::from_vec(after_items),
+                    );
+                    let mut nodes = vec![list_before];
+                    nodes.extend(inner_blocks);
+                    nodes.push(list_after);
+                    Fragment::from_vec(nodes)
+                };
+
+                let slice = Slice::new(replacement, 0, 0);
                 let mut tr = Transform::new(self.doc.clone());
                 if tr.replace(list_start, list_end, slice).is_ok() {
-                    // A position inside the Kth ListItem (0-indexed) has
-                    // 2 + 2*K wrapper tokens before it that were removed:
-                    // 1 (list open) + 1 (li_K open) + 2*K (close+open per preceding item).
-                    let anchor_item = self
-                        .doc
-                        .resolve(self.selection.anchor.min(self.doc.content.size()))
-                        .index(depth);
-                    let head_item = if self.selection.head == self.selection.anchor {
-                        anchor_item
-                    } else {
-                        self.doc
-                            .resolve(self.selection.head.min(self.doc.content.size()))
-                            .index(depth)
-                    };
-                    let new_anchor =
-                        self.selection.anchor.saturating_sub(2 + 2 * anchor_item);
-                    let new_head =
-                        self.selection.head.saturating_sub(2 + 2 * head_item);
+                    // Cursor position adjustment:
+                    // - First/only item (index 0): cursor shifts -2
+                    //   (list_open + li_open removed before content)
+                    // - Middle/last item: cursor stays same
+                    //   (li_open replaced by list_close at the same position)
+                    let shift: isize = if item_index == 0 { -2 } else { 0 };
+                    let new_anchor = (self.selection.anchor as isize + shift).max(0) as usize;
+                    let new_head = (self.selection.head as isize + shift).max(0) as usize;
                     self.doc = tr.doc;
                     let max = self.doc.content.size();
-                    self.selection =
-                        Selection::range(new_anchor.min(max), new_head.min(max));
+                    self.selection = Selection::range(new_anchor.min(max), new_head.min(max));
                     self.redo_stack.clear();
                 }
             }

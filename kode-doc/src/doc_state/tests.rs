@@ -779,7 +779,7 @@ mod main_tests {
     }
 
     #[test]
-    fn toggle_bullet_list_roundtrip_multi_item() {
+    fn toggle_bullet_list_off_extracts_first_item_only() {
         // Build: <doc><p>Hello</p><p>World</p></doc>
         let mut state = DocState::from_doc(two_para_doc());
 
@@ -796,30 +796,27 @@ mod main_tests {
         assert_eq!(ul.child(0).child(0).text_content(), "Hello");
         assert_eq!(ul.child(1).child(0).text_content(), "World");
 
-        // Toggle bullet list OFF — should produce two plain paragraphs.
+        // Place a collapsed cursor inside item 0 and toggle OFF.
+        // Wrapped positions: UL(0) LI1(1) P1(2) H(3) e(4) l(5) l(6) o(7) /P1(8) /LI1(9)
+        //                    LI2(10) P2(11) W(12) o(13) r(14) l(15) d(16) /P2(17) /LI2(18) /UL(19)
+        state.set_selection(Selection::cursor(4));
         state.toggle_bullet_list();
+
+        // Only item 0 extracted; item 1 stays in the list.
         assert!(!state.is_in_node(NodeType::BulletList));
-        assert!(!state.is_in_node(NodeType::ListItem));
         assert_eq!(
             state.doc.child_count(),
             2,
-            "After lift, doc should have 2 paragraphs but got: {:#?}",
+            "After toggle off, doc should have Paragraph + BulletList but got: {:#?}",
             state.doc
         );
         assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
         assert_eq!(state.doc.child(0).text_content(), "Hello");
-        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
-        assert_eq!(state.doc.child(1).text_content(), "World");
-
-        // Select across both paragraphs, then toggle bullet list ON again.
-        state.set_selection(Selection::range(2, 9));
-        state.toggle_bullet_list();
-        assert_eq!(state.doc.child_count(), 1);
-        let ul2 = state.doc.child(0);
-        assert_eq!(ul2.node_type, NodeType::BulletList);
-        assert_eq!(ul2.child_count(), 2);
-        assert_eq!(ul2.child(0).child(0).text_content(), "Hello");
-        assert_eq!(ul2.child(1).child(0).text_content(), "World");
+        assert_eq!(state.doc.child(1).node_type, NodeType::BulletList);
+        assert_eq!(state.doc.child(1).child_count(), 1);
+        assert_eq!(state.doc.child(1).child(0).child(0).text_content(), "World");
+        // Cursor shifted -2 (removed UL_open + LI_open).
+        assert_eq!(state.selection.anchor, 2);
     }
 
     #[test]
@@ -840,6 +837,185 @@ mod main_tests {
         let ol = state.doc.child(0);
         assert_eq!(ol.node_type, NodeType::OrderedList);
         assert_eq!(ol.child(0).child(0).text_content(), "Hello");
+    }
+
+    // ── toggle list off: single-item extraction tests ─────────────────
+
+    /// Build: <doc><ul><li><p>aaa</p></li><li><p>bbb</p></li><li><p>ccc</p></li></ul></doc>
+    ///
+    /// Positions:
+    /// 0:UL  1:LI1  2:P1  3:a 4:a 5:a  6:/P1  7:/LI1
+    /// 8:LI2  9:P2  10:b 11:b 12:b  13:/P2  14:/LI2
+    /// 15:LI3  16:P3  17:c 18:c 19:c  20:/P3  21:/LI3  22:/UL
+    fn three_item_bullet_list_doc() -> Node {
+        let items: Vec<Node> = ["aaa", "bbb", "ccc"]
+            .iter()
+            .map(|text| {
+                Node::branch(
+                    NodeType::ListItem,
+                    Fragment::from_node(Node::branch(
+                        NodeType::Paragraph,
+                        Fragment::from_node(Node::new_text(text)),
+                    )),
+                )
+            })
+            .collect();
+        let list = Node::branch(NodeType::BulletList, Fragment::from_vec(items));
+        Node::branch(NodeType::Doc, Fragment::from_node(list))
+    }
+
+    #[test]
+    fn toggle_list_off_only_item() {
+        // Single-item list: toggling off extracts the paragraph.
+        let mut state = DocState::from_doc(simple_doc());
+        state.set_selection(Selection::cursor(3));
+        state.toggle_bullet_list();
+        assert!(state.is_in_node(NodeType::BulletList));
+
+        state.toggle_bullet_list();
+        assert!(!state.is_in_node(NodeType::BulletList));
+        assert_eq!(state.doc.child_count(), 1);
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "Hello");
+        assert_eq!(state.selection.anchor, 3); // 5 - 2 (UL_open + LI_open)
+    }
+
+    #[test]
+    fn toggle_list_off_first_item() {
+        // 3-item list, cursor in item 0 (position 4).
+        // Extracting item 0 should produce: P("aaa") + BulletList("bbb", "ccc").
+        let mut state = DocState::from_doc(three_item_bullet_list_doc());
+        state.set_selection(Selection::cursor(4));
+        assert!(state.is_in_node(NodeType::BulletList));
+
+        state.toggle_bullet_list();
+
+        assert_eq!(
+            state.doc.child_count(),
+            2,
+            "Expected Paragraph + BulletList, got: {:#?}",
+            state.doc
+        );
+        assert_eq!(state.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(0).text_content(), "aaa");
+
+        let ul = state.doc.child(1);
+        assert_eq!(ul.node_type, NodeType::BulletList);
+        assert_eq!(ul.child_count(), 2);
+        assert_eq!(ul.child(0).child(0).text_content(), "bbb");
+        assert_eq!(ul.child(1).child(0).text_content(), "ccc");
+
+        // Cursor should shift by -2 (UL_open + LI_open removed).
+        assert_eq!(state.selection.anchor, 2); // 4 - 2
+    }
+
+    #[test]
+    fn toggle_list_off_last_item() {
+        // 3-item list, cursor in item 2 (position 18).
+        // Extracting last item should produce: BulletList("aaa", "bbb") + P("ccc").
+        let mut state = DocState::from_doc(three_item_bullet_list_doc());
+        state.set_selection(Selection::cursor(18));
+        assert!(state.is_in_node(NodeType::BulletList));
+
+        state.toggle_bullet_list();
+
+        assert_eq!(
+            state.doc.child_count(),
+            2,
+            "Expected BulletList + Paragraph, got: {:#?}",
+            state.doc
+        );
+        let ul = state.doc.child(0);
+        assert_eq!(ul.node_type, NodeType::BulletList);
+        assert_eq!(ul.child_count(), 2);
+        assert_eq!(ul.child(0).child(0).text_content(), "aaa");
+        assert_eq!(ul.child(1).child(0).text_content(), "bbb");
+
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "ccc");
+
+        // Cursor position unchanged for last item.
+        assert_eq!(state.selection.anchor, 18);
+    }
+
+    #[test]
+    fn toggle_list_off_middle_item() {
+        // 3-item list, cursor in item 1 (position 11).
+        // Extracting middle item should produce: BulletList("aaa") + P("bbb") + BulletList("ccc").
+        let mut state = DocState::from_doc(three_item_bullet_list_doc());
+        state.set_selection(Selection::cursor(11));
+        assert!(state.is_in_node(NodeType::BulletList));
+
+        state.toggle_bullet_list();
+
+        assert_eq!(
+            state.doc.child_count(),
+            3,
+            "Expected BulletList + Paragraph + BulletList, got: {:#?}",
+            state.doc
+        );
+        assert_eq!(state.doc.child(0).node_type, NodeType::BulletList);
+        assert_eq!(state.doc.child(0).child_count(), 1);
+        assert_eq!(state.doc.child(0).child(0).child(0).text_content(), "aaa");
+
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "bbb");
+
+        assert_eq!(state.doc.child(2).node_type, NodeType::BulletList);
+        assert_eq!(state.doc.child(2).child_count(), 1);
+        assert_eq!(state.doc.child(2).child(0).child(0).text_content(), "ccc");
+
+        // Cursor position unchanged for middle item.
+        assert_eq!(state.selection.anchor, 11);
+    }
+
+    #[test]
+    fn toggle_ordered_list_off_middle_item() {
+        // Same test but with ordered list to verify both list types work.
+        let items: Vec<Node> = ["aaa", "bbb", "ccc"]
+            .iter()
+            .map(|text| {
+                Node::branch(
+                    NodeType::ListItem,
+                    Fragment::from_node(Node::branch(
+                        NodeType::Paragraph,
+                        Fragment::from_node(Node::new_text(text)),
+                    )),
+                )
+            })
+            .collect();
+        let list = Node::branch_with_attrs(
+            NodeType::OrderedList,
+            crate::attrs::ordered_list_attrs(1),
+            Fragment::from_vec(items),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(list));
+
+        let mut state = DocState::from_doc(doc);
+        state.set_selection(Selection::cursor(11));
+        assert!(state.is_in_node(NodeType::OrderedList));
+
+        state.toggle_ordered_list();
+
+        assert_eq!(
+            state.doc.child_count(),
+            3,
+            "Expected OrderedList + Paragraph + OrderedList, got: {:#?}",
+            state.doc
+        );
+        assert_eq!(state.doc.child(0).node_type, NodeType::OrderedList);
+        assert_eq!(state.doc.child(0).child_count(), 1);
+        assert_eq!(state.doc.child(0).child(0).child(0).text_content(), "aaa");
+
+        assert_eq!(state.doc.child(1).node_type, NodeType::Paragraph);
+        assert_eq!(state.doc.child(1).text_content(), "bbb");
+
+        assert_eq!(state.doc.child(2).node_type, NodeType::OrderedList);
+        assert_eq!(state.doc.child(2).child_count(), 1);
+        assert_eq!(state.doc.child(2).child(0).child(0).text_content(), "ccc");
+
+        // Cursor position unchanged for middle item.
+        assert_eq!(state.selection.anchor, 11);
     }
 
     // ── split_block in list tests ────────────────────────────────────
