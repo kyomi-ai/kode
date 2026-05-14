@@ -779,3 +779,13 @@ body.kode-dragging * {
 
 /* .kode-text-segment — wrapper div for text blocks in segment-based rendering.
    No visual styles needed; used as an innerHTML update target by patch_segments(). */
+
+/* ── Read-only mode ────────────────────────────────────────────────── */
+
+.wysiwyg-readonly .wysiwyg-scroll-container {
+    cursor: default;
+}
+
+.wysiwyg-readonly .kode-gap-cursor {
+    display: none;
+}

@@ -87,6 +87,9 @@ pub fn TreeWysiwygEditor(
     /// draggable by default.
     #[prop(optional)]
     can_drag_block: Option<Arc<dyn Fn(usize, usize) -> bool + Send + Sync>>,
+    /// Read-only mode: disables editing, hides toolbars, suppresses callbacks.
+    #[prop(default = false)]
+    readonly: bool,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
     let atomic_langs: HashSet<String> = extensions
@@ -119,7 +122,7 @@ pub fn TreeWysiwygEditor(
         target_pos: std::cell::Cell<usize>,
     }
 
-    let drag_state = if enable_block_drag {
+    let drag_state = if enable_block_drag && !readonly {
         Some(std::rc::Rc::new(DragState {
             active: std::cell::Cell::new(false),
             source_start: std::cell::Cell::new(0),
@@ -169,7 +172,7 @@ pub fn TreeWysiwygEditor(
     // IMPORTANT: notify must NOT lock the doc_state. The signal update
     // can synchronously trigger the render closure which also locks the
     // doc_state, causing a recursive lock panic in WASM's single-threaded mutex.
-    let on_change_notify = on_change.clone();
+    let on_change_notify = if readonly { None } else { on_change.clone() };
     let notify = move |new_text: Option<String>| {
         version.update(|v| *v += 1);
         if let (Some(ref cb), Some(text)) = (&on_change_notify, new_text) {
@@ -178,7 +181,7 @@ pub fn TreeWysiwygEditor(
     };
 
     // ── inject: insert content at cursor when the signal is written ────
-    if let Some(inject_signal) = inject {
+    if let (Some(inject_signal), false) = (inject, readonly) {
         let doc_inject = doc_state.clone();
         let on_change_inject = on_change.clone();
         Effect::new(move || {
@@ -374,6 +377,7 @@ pub fn TreeWysiwygEditor(
         let editor_input = editor_ref;
 
         let beforeinput_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            if readonly { return; }
             let input_ev: web_sys::InputEvent = ev.unchecked_into();
 
             // During IME composition, let the browser handle it.
@@ -485,6 +489,7 @@ pub fn TreeWysiwygEditor(
         let doc_cut = doc_state.clone();
         let notify_cut = notify.clone();
         let cut_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            if readonly { return; }
             let Ok(mut ds) = doc_cut.lock() else { return };
             let sel = ds.selection().clone();
             if sel.is_cursor() {
@@ -513,6 +518,7 @@ pub fn TreeWysiwygEditor(
         let doc_paste = doc_state.clone();
         let notify_paste = notify.clone();
         let paste_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            if readonly { return; }
             // Only handle paste here if beforeinput didn't handle it.
             // Check if the event is already defaultPrevented (which means
             // beforeinput already handled it).
@@ -965,8 +971,23 @@ pub fn TreeWysiwygEditor(
         }
 
         let ctrl = ev.ctrl_key() || ev.meta_key();
-        let shift = ev.shift_key();
         let key = ev.key();
+
+        if readonly {
+            if ctrl && key == "c" {
+                return;
+            }
+            match key.as_str() {
+                "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
+                | "Home" | "End" | "PageUp" | "PageDown"
+                | "Tab" | "Escape" | "Shift" => return,
+                _ => {}
+            }
+            ev.prevent_default();
+            return;
+        }
+
+        let shift = ev.shift_key();
 
         // Clipboard shortcuts: let copy/cut/paste events handle these.
         match key.as_str() {
@@ -1301,11 +1322,13 @@ pub fn TreeWysiwygEditor(
 
     // ── Composition events (IME) ─────────────────────────────────────────
     let on_composition_start = move |_: CompositionEvent| {
+        if readonly { return; }
         composing.set(true);
     };
     let doc_comp_end = doc_state.clone();
     let notify_comp = notify.clone();
     let on_composition_end = move |ev: CompositionEvent| {
+        if readonly { return; }
         composing.set(false);
         if let Some(data) = ev.data() {
             if !data.is_empty() {
@@ -1426,7 +1449,7 @@ pub fn TreeWysiwygEditor(
     }
 
     // ── Mouse selection tracking for floating toolbar ──────────────────────
-    if show_floating_toolbar {
+    if show_floating_toolbar && !readonly {
         let mouse_selecting_down = mouse_selecting.clone();
         let mouse_selecting_up = mouse_selecting.clone();
         let editor_mousedown = editor_ref;
@@ -1501,7 +1524,7 @@ pub fn TreeWysiwygEditor(
     }
 
     // ── Toolbar ───────────────────────────────────────────────────────────
-    let toolbar_view = if show_fixed_toolbar {
+    let toolbar_view = if show_fixed_toolbar && !readonly {
         let items = toolbar_items.unwrap_or_else(|| {
             let mut items = default_toolbar_items();
             for ext_item in extension_toolbar_items {
@@ -1525,7 +1548,7 @@ pub fn TreeWysiwygEditor(
     };
 
     // ── Floating toolbar ────────────────────────────────────────────────
-    let floating_toolbar_view = if show_floating_toolbar {
+    let floating_toolbar_view = if show_floating_toolbar && !readonly {
         let items = floating_toolbar_items.unwrap_or_else(default_toolbar_items);
         let toolbar_views = render_toolbar_items(
             items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
@@ -1547,7 +1570,7 @@ pub fn TreeWysiwygEditor(
     };
 
     // ── Slash menu view ───────────────────────────────────────────────
-    let slash_menu_view = if show_slash_menu && !slash_menu_items.is_empty() {
+    let slash_menu_view = if show_slash_menu && !slash_menu_items.is_empty() && !readonly {
         let menu_items_view: Vec<AnyView> = slash_menu_items.iter().enumerate().map(|(i, item)| {
             let (icon_svg, icon_text, name, desc) = match item {
                 SlashMenuItem::Builtin { button, label, description } => (
@@ -1624,6 +1647,7 @@ pub fn TreeWysiwygEditor(
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
     let on_mousedown = move |ev: MouseEvent| {
+        if readonly { return; }
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
@@ -1689,7 +1713,7 @@ pub fn TreeWysiwygEditor(
     view! {
         <style>{theme_css}</style>
         <style>{include_str!("../wysiwyg.css")}</style>
-        <div class="wysiwyg-container"
+        <div class={if readonly { "wysiwyg-container wysiwyg-readonly" } else { "wysiwyg-container" }}
             style=move || {
                 let mut css = theme.get().to_css_vars();
                 if let Some(ref mw) = container_max_width {
@@ -1703,7 +1727,7 @@ pub fn TreeWysiwygEditor(
             <div
                 node_ref=editor_ref
                 class=if show_slash_menu { "wysiwyg-scroll-container tree-wysiwyg-scroll-container kode-slash-enabled" } else { "wysiwyg-scroll-container tree-wysiwyg-scroll-container" }
-                contenteditable="true"
+                contenteditable=if readonly { "false" } else { "true" }
                 spellcheck="false"
                 on:keydown=on_keydown
                 on:mousedown=on_mousedown
