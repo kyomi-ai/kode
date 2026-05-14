@@ -1647,9 +1647,23 @@ pub fn TreeWysiwygEditor(
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
     let on_mousedown = move |ev: MouseEvent| {
-        if readonly { return; }
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+
+        // Prevent focus loss when mousedown lands on the copy button.
+        let mut walk = Some(target_el.clone());
+        while let Some(ref current) = walk {
+            if current.class_list().contains("wysiwyg-code-copy") {
+                ev.prevent_default();
+                return;
+            }
+            if current.class_list().contains("wysiwyg-scroll-container") {
+                break;
+            }
+            walk = current.parent_element();
+        }
+
+        if readonly { return; }
 
         // Walk up from the click target to find an atomic extension block.
         let mut el = Some(target_el.clone());
@@ -1731,6 +1745,61 @@ pub fn TreeWysiwygEditor(
                 spellcheck="false"
                 on:keydown=on_keydown
                 on:mousedown=on_mousedown
+                on:click=move |ev: MouseEvent| {
+                    let Some(target) = ev.target() else { return };
+                    let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+
+                    // Walk up to find the copy button (click may be on the SVG/path inside it)
+                    let mut el = Some(target_el.clone());
+                    let mut copy_btn: Option<web_sys::Element> = None;
+                    while let Some(ref current) = el {
+                        if current.class_list().contains("wysiwyg-code-copy") {
+                            copy_btn = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("wysiwyg-scroll-container") {
+                            break;
+                        }
+                        el = current.parent_element();
+                    }
+
+                    let Some(btn) = copy_btn else { return };
+
+                    ev.prevent_default();
+                    ev.stop_propagation();
+
+                    // Find the sibling <code> element to get the raw text.
+                    // In the segment renderer the structure is <pre> > <button> + <code>.
+                    // In the view renderer it is <div> > <button> + <pre> > <code>.
+                    let Some(pre) = btn.parent_element() else { return };
+                    let Some(code_el) = pre.query_selector("code").ok().flatten() else { return };
+                    let text = code_el.text_content().unwrap_or_default();
+
+                    // Copy to clipboard
+                    let btn_clone = btn.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let Some(window) = web_sys::window() else { return };
+                        let clipboard = window.navigator().clipboard();
+                        let promise = clipboard.write_text(&text);
+                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+
+                        // Visual feedback: swap icon to checkmark
+                        btn_clone.set_inner_html(super::doc_renderer::CHECK_ICON_SVG);
+                        let _ = btn_clone.class_list().add_1("copied");
+
+                        // Restore after 2 seconds
+                        let restore_btn = btn_clone.clone();
+                        let cb = Closure::once(move || {
+                            restore_btn.set_inner_html(super::doc_renderer::COPY_ICON_SVG);
+                            let _ = restore_btn.class_list().remove_1("copied");
+                        });
+                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                            cb.as_ref().unchecked_ref(),
+                            2000,
+                        );
+                        cb.forget();
+                    });
+                }
                 on:scroll={
                     let slash_trigger_scroll = slash_trigger_for_scroll.clone();
                     move |_| {

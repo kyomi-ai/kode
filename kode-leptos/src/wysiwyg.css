@@ -337,6 +337,51 @@ pre.wysiwyg-code-block code {
     white-space: pre;
 }
 
+/* ── Code block copy button ───────────────────────────────────────── */
+
+.wysiwyg-code-copy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--kode-border, rgba(128, 128, 128, 0.3));
+    border-radius: 4px;
+    background: var(--kode-code-block-background, var(--kode-bg));
+    color: var(--kode-fg-dim, #888);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+    pointer-events: auto;
+    user-select: none;
+}
+
+pre.wysiwyg-code-block:hover .wysiwyg-code-copy,
+div.wysiwyg-code-block:hover .wysiwyg-code-copy,
+.wysiwyg-code-copy:focus-visible {
+    opacity: 1;
+}
+
+.wysiwyg-code-copy:hover {
+    color: var(--kode-fg, #ccc);
+    background: var(--kode-bg-highlight, rgba(128, 128, 128, 0.15));
+}
+
+.wysiwyg-code-copy.copied {
+    color: var(--kode-success, #10b981);
+    opacity: 1;
+}
+
+/* Hide language label when copy button is visible to avoid overlap */
+pre.wysiwyg-code-block:hover[data-lang]::before {
+    opacity: 0;
+}
+
 /* ── Gap cursor (caret between blocks next to atomic elements) ────── */
 
 .kode-gap-cursor {
