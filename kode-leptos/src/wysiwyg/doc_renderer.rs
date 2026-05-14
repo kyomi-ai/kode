@@ -13,9 +13,16 @@ use std::sync::Arc;
 use kode_doc::attrs::{get_attr, AttrValue};
 use kode_doc::{Fragment, Mark, MarkType, Node, NodeType};
 use leptos::prelude::*;
+use web_sys::MouseEvent;
 
 use crate::extension::Extension;
 use crate::highlight::{self, html_escape, Language};
+
+/// Clipboard SVG icon used for the code block copy button.
+pub(crate) const COPY_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>"#;
+
+/// Checkmark SVG icon shown after a successful copy-to-clipboard.
+pub(crate) const CHECK_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>"#;
 
 /// Render a kode-doc document tree into Leptos views for the WYSIWYG editor.
 ///
@@ -247,6 +254,9 @@ pub(crate) fn render_block_node(
                         } else {
                             None
                         }}
+                        <button class="wysiwyg-code-copy" contenteditable="false" tabindex="-1"
+                            on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }
+                            inner_html=COPY_ICON_SVG />
                         // NOTE: highlight_line() HTML-escapes source text before wrapping in <span> tags
                         <pre class="kode-content"><code data-pos-start=content_start data-pos-end=content_end inner_html=code_html /></pre>
                     </div>
@@ -946,10 +956,13 @@ fn block_node_to_html(
                 html.push_str(&format!(
                     "<pre class=\"wysiwyg-code-block kode-content\" \
                      data-pos-start=\"{cs}\" data-pos-end=\"{ce}\"{lang_attr}>\
+                     <button class=\"wysiwyg-code-copy\" contenteditable=\"false\" tabindex=\"-1\">\
+                     {copy_icon}</button>\
                      <code>{code}</code></pre>",
                     cs = content_start,
                     ce = content_end,
                     lang_attr = lang_attr,
+                    copy_icon = COPY_ICON_SVG,
                     code = code_html,
                 ));
             }
@@ -1740,8 +1753,11 @@ mod tests {
 
         assert!(html.contains("wysiwyg-code-block"));
         assert!(html.contains("<code>"));
-        assert!(!html.contains("contenteditable=\"false\""));
+        // The copy button has contenteditable="false" but the block itself
+        // should NOT be wrapped in a contenteditable="false" extension div.
         assert!(!html.contains("kode-extension-block"));
+        // Verify the copy button is present
+        assert!(html.contains("wysiwyg-code-copy"));
     }
 
     #[test]

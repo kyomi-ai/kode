@@ -27,6 +27,7 @@ leptos = { version = "0.8", features = ["csr"] }
 arborium = { version = "2.16", default-features = false }
 arborium-theme = "2.16"
 web-sys = { version = "0.3", features = [
+    "Clipboard",
     "HtmlTextAreaElement",
     "HtmlElement",
     "HtmlDivElement",
@@ -35,6 +36,7 @@ web-sys = { version = "0.3", features = [
     "MouseEvent",
     "DomRect",
     "DomRectList",
+    "Navigator",
     "Window",
     "Document",
     "Element",
