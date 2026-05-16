@@ -829,6 +829,7 @@ body.kode-dragging * {
 
 .wysiwyg-readonly .wysiwyg-scroll-container {
     cursor: default;
+    user-select: text;
 }
 
 .wysiwyg-readonly .kode-gap-cursor {
