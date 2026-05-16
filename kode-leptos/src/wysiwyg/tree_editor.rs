@@ -1741,7 +1741,8 @@ pub fn TreeWysiwygEditor(
             <div
                 node_ref=editor_ref
                 class=if show_slash_menu { "wysiwyg-scroll-container tree-wysiwyg-scroll-container kode-slash-enabled" } else { "wysiwyg-scroll-container tree-wysiwyg-scroll-container" }
-                contenteditable=if readonly { "false" } else { "true" }
+                contenteditable={(!readonly).then_some("true")}
+                tabindex={readonly.then_some("0")}
                 spellcheck="false"
                 on:keydown=on_keydown
                 on:mousedown=on_mousedown
