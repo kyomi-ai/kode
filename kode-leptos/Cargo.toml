@@ -27,6 +27,7 @@ leptos = { version = "0.8", features = ["csr"] }
 arborium = { version = "2.16", default-features = false }
 arborium-theme = "2.16"
 web-sys = { version = "0.3", features = [
+    "Blob",
     "Clipboard",
     "HtmlTextAreaElement",
     "HtmlElement",

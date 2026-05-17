@@ -53,6 +53,8 @@ pub struct UploadTrigger {
     pub content_type: String,
     /// Unique ID for this upload instance (matches the placeholder).
     pub placeholder_id: String,
+    /// The file's raw bytes.
+    pub data: Vec<u8>,
 }
 
 /// Signal value for completing an upload.

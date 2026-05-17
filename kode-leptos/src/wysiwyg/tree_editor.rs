@@ -487,12 +487,11 @@ pub fn TreeWysiwygEditor(
                                 ds.insert_from_markdown(&md);
                             }
                         } else if !plain.is_empty() {
-                            ds.insert_text_multiline(&plain);
+                            ds.insert_from_markdown(&plain);
                         }
                     } else if let Some(data) = input_ev.data() {
-                        // Some browsers put paste data in .data() instead of dataTransfer
                         if !data.is_empty() {
-                            ds.insert_text_multiline(&data);
+                            ds.insert_from_markdown(&data);
                         }
                     }
                 }
@@ -614,13 +613,27 @@ pub fn TreeWysiwygEditor(
                             drop(ds);
                             (notify_paste)(Some(new_md));
 
-                            let trigger = super::attachment::UploadTrigger {
-                                name: file.name(),
-                                size: file.size() as u64,
-                                content_type: file.type_(),
-                                placeholder_id,
-                            };
-                            upload_fn(trigger);
+                            let upload_fn = Arc::clone(upload_fn);
+                            let file_name = file.name();
+                            let file_size = file.size() as u64;
+                            let file_type = file.type_();
+                            let pid = placeholder_id.clone();
+
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let promise = file.array_buffer();
+                                let Ok(buffer) = wasm_bindgen_futures::JsFuture::from(promise).await else { return };
+                                let array = js_sys::Uint8Array::new(&buffer);
+                                let data = array.to_vec();
+
+                                let trigger = super::attachment::UploadTrigger {
+                                    name: file_name,
+                                    size: file_size,
+                                    content_type: file_type,
+                                    placeholder_id: pid,
+                                    data,
+                                };
+                                upload_fn(trigger);
+                            });
                         }
                     }
                 }
@@ -640,7 +653,7 @@ pub fn TreeWysiwygEditor(
                     ds.insert_from_markdown(&md);
                 }
             } else if !plain.is_empty() {
-                ds.insert_text_multiline(&plain);
+                ds.insert_from_markdown(&plain);
             }
 
             let new_md = ds.to_markdown();
@@ -753,13 +766,27 @@ pub fn TreeWysiwygEditor(
                 drop(ds);
                 (notify_drop)(Some(new_md));
 
-                let trigger = super::attachment::UploadTrigger {
-                    name: file.name(),
-                    size: file.size() as u64,
-                    content_type: file.type_(),
-                    placeholder_id,
-                };
-                upload_fn_drop(trigger);
+                let upload_fn = Arc::clone(&upload_fn_drop);
+                let file_name = file.name();
+                let file_size = file.size() as u64;
+                let file_type = file.type_();
+                let pid = placeholder_id.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    let promise = file.array_buffer();
+                    let Ok(buffer) = wasm_bindgen_futures::JsFuture::from(promise).await else { return };
+                    let array = js_sys::Uint8Array::new(&buffer);
+                    let data = array.to_vec();
+
+                    let trigger = super::attachment::UploadTrigger {
+                        name: file_name,
+                        size: file_size,
+                        content_type: file_type,
+                        placeholder_id: pid,
+                        data,
+                    };
+                    upload_fn(trigger);
+                });
             }
         });
 
