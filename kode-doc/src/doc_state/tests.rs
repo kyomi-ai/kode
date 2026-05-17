@@ -1591,6 +1591,32 @@ mod clipboard_tests {
         assert_eq!(state.to_markdown(), before);
     }
 
+    #[test]
+    fn insert_from_markdown_external_paste_with_formatting() {
+        let mut state = DocState::from_markdown("Existing content");
+        state.set_selection(Selection::cursor(17)); // end of "Existing content"
+        // Simulates external paste containing markdown syntax
+        state.insert_from_markdown("# Title\n\nSome **bold** text\n\n- item 1\n- item 2\n\n```rust\nfn main() {}\n```");
+        let md = state.to_markdown();
+        assert!(md.contains("# Title"), "heading should render: {md:?}");
+        assert!(md.contains("**bold**"), "bold should render: {md:?}");
+        assert!(md.contains("- item 1"), "list should render: {md:?}");
+        assert!(md.contains("```rust"), "code block should render: {md:?}");
+    }
+
+    #[test]
+    fn insert_from_markdown_plain_text_without_syntax() {
+        let mut state = DocState::from_markdown("Hello");
+        state.set_selection(Selection::cursor(6)); // end of "Hello"
+        // Plain text with no markdown syntax still works correctly
+        state.insert_from_markdown("world");
+        let md = state.to_markdown();
+        assert!(
+            md.contains("Helloworld"),
+            "plain text should insert inline: {md:?}"
+        );
+    }
+
     // ── insert_text_multiline ─────────────────────────────────────────
 
     #[test]

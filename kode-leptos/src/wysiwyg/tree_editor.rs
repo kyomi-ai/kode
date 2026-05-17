@@ -487,12 +487,11 @@ pub fn TreeWysiwygEditor(
                                 ds.insert_from_markdown(&md);
                             }
                         } else if !plain.is_empty() {
-                            ds.insert_text_multiline(&plain);
+                            ds.insert_from_markdown(&plain);
                         }
                     } else if let Some(data) = input_ev.data() {
-                        // Some browsers put paste data in .data() instead of dataTransfer
                         if !data.is_empty() {
-                            ds.insert_text_multiline(&data);
+                            ds.insert_from_markdown(&data);
                         }
                     }
                 }
@@ -654,7 +653,7 @@ pub fn TreeWysiwygEditor(
                     ds.insert_from_markdown(&md);
                 }
             } else if !plain.is_empty() {
-                ds.insert_text_multiline(&plain);
+                ds.insert_from_markdown(&plain);
             }
 
             let new_md = ds.to_markdown();
