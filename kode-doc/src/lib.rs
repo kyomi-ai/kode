@@ -25,13 +25,13 @@ pub mod slice;
 pub mod step;
 pub mod transform;
 
-pub use attrs::{AttrValue, Attrs};
+pub use attrs::{file_block_attrs, image_block_attrs, AttrValue, Attrs};
 pub use doc_state::{DocState, FormattingState, GapSide, Selection};
 pub use fragment::Fragment;
 pub use mark::{Mark, MarkType};
 pub use node::Node;
 pub use node_type::{can_contain, NodeType};
-pub use parse::parse_markdown;
+pub use parse::{parse_markdown, parse_markdown_with_config, MarkdownConfig};
 pub use position::ResolvedPos;
 pub use serialize::{byte_offset_to_tree_pos, serialize_markdown, tree_pos_to_byte_offset};
 pub use slice::Slice;

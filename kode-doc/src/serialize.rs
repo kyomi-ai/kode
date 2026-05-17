@@ -84,6 +84,12 @@ fn serialize_node(node: &Node, out: &mut String, ctx: &BlockContext) {
         NodeType::Image => {
             serialize_image(node, out);
         }
+        NodeType::ImageBlock => {
+            serialize_image_block(node, out);
+        }
+        NodeType::FileBlock => {
+            serialize_file_block(node, out);
+        }
         NodeType::Table => {
             serialize_table(node, out);
         }
@@ -414,6 +420,40 @@ fn serialize_image(node: &Node, out: &mut String) {
     out.push(')');
 }
 
+/// Serialize a block-level image node.
+fn serialize_image_block(node: &Node, out: &mut String) {
+    let src = match get_attr(&node.attrs, "src") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => "",
+    };
+    let alt = match get_attr(&node.attrs, "alt") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => "",
+    };
+    out.push_str("![");
+    out.push_str(alt);
+    out.push_str("](");
+    out.push_str(src);
+    out.push(')');
+}
+
+/// Serialize a block-level file attachment node.
+fn serialize_file_block(node: &Node, out: &mut String) {
+    let href = match get_attr(&node.attrs, "href") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => "",
+    };
+    let filename = match get_attr(&node.attrs, "filename") {
+        Some(AttrValue::String(s)) => s.as_str(),
+        _ => "",
+    };
+    out.push('[');
+    out.push_str(filename);
+    out.push_str("](");
+    out.push_str(href);
+    out.push(')');
+}
+
 /// Map a tree token position to the corresponding byte offset in the
 /// serialized markdown string.
 ///
@@ -605,6 +645,34 @@ fn reverse_pos_map_node(node: &Node, state: &mut ReversePosMapState) {
         NodeType::HorizontalRule => {
             state.tree_pos += 1;
             state.byte_offset += 3;
+            state.check();
+        }
+        NodeType::ImageBlock => {
+            state.tree_pos += 1;
+            let src = match get_attr(&node.attrs, "src") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let alt = match get_attr(&node.attrs, "alt") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            // "![alt](src)"
+            state.byte_offset += 2 + alt.len() + 2 + src.len() + 1;
+            state.check();
+        }
+        NodeType::FileBlock => {
+            state.tree_pos += 1;
+            let href = match get_attr(&node.attrs, "href") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let filename = match get_attr(&node.attrs, "filename") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            // "[filename](href)"
+            state.byte_offset += 1 + filename.len() + 2 + href.len() + 1;
             state.check();
         }
         _ => {
@@ -834,6 +902,40 @@ fn pos_map_node(node: &Node, state: &mut PosMapState) {
             }
             state.tree_pos += 1;
             state.byte_offset += 3; // "---"
+        }
+        NodeType::ImageBlock => {
+            // ImageBlock is a leaf block: 1 tree position, "![alt](src)" in markdown.
+            if state.check() {
+                return;
+            }
+            state.tree_pos += 1;
+            let src = match get_attr(&node.attrs, "src") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let alt = match get_attr(&node.attrs, "alt") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            // "![alt](src)"
+            state.byte_offset += 2 + alt.len() + 2 + src.len() + 1;
+        }
+        NodeType::FileBlock => {
+            // FileBlock is a leaf block: 1 tree position, "[filename](href)" in markdown.
+            if state.check() {
+                return;
+            }
+            state.tree_pos += 1;
+            let href = match get_attr(&node.attrs, "href") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            let filename = match get_attr(&node.attrs, "filename") {
+                Some(AttrValue::String(s)) => s.as_str(),
+                _ => "",
+            };
+            // "[filename](href)"
+            state.byte_offset += 1 + filename.len() + 2 + href.len() + 1;
         }
         _ => {
             // Branch nodes: opening token (+1 tree pos, variable markdown bytes),
@@ -1537,5 +1639,49 @@ mod tests {
         let tree = parse_markdown(input);
         let output = serialize_markdown(&tree);
         assert_eq!(output, input);
+    }
+
+    // ── ImageBlock and FileBlock serialization tests ───────────────
+
+    #[test]
+    fn serialize_image_block_node() {
+        let attrs = crate::attrs::image_block_attrs("photo.png", "A photo", None, None, None);
+        let d = doc(vec![Node::leaf_with_attrs(NodeType::ImageBlock, attrs)]);
+        assert_eq!(serialize_markdown(&d), "![A photo](photo.png)");
+    }
+
+    #[test]
+    fn serialize_file_block_node() {
+        let attrs = crate::attrs::file_block_attrs("/files/report.pdf", "report.pdf", None, None, None);
+        let d = doc(vec![Node::leaf_with_attrs(NodeType::FileBlock, attrs)]);
+        assert_eq!(serialize_markdown(&d), "[report.pdf](/files/report.pdf)");
+    }
+
+    #[test]
+    fn serialize_image_block_among_blocks() {
+        let attrs = crate::attrs::image_block_attrs("photo.png", "A photo", None, None, None);
+        let d = doc(vec![
+            para(vec![text("Before")]),
+            Node::leaf_with_attrs(NodeType::ImageBlock, attrs),
+            para(vec![text("After")]),
+        ]);
+        assert_eq!(
+            serialize_markdown(&d),
+            "Before\n\n![A photo](photo.png)\n\nAfter"
+        );
+    }
+
+    #[test]
+    fn serialize_file_block_among_blocks() {
+        let attrs = crate::attrs::file_block_attrs("/files/doc.pdf", "doc.pdf", None, None, None);
+        let d = doc(vec![
+            para(vec![text("Before")]),
+            Node::leaf_with_attrs(NodeType::FileBlock, attrs),
+            para(vec![text("After")]),
+        ]);
+        assert_eq!(
+            serialize_markdown(&d),
+            "Before\n\n[doc.pdf](/files/doc.pdf)\n\nAfter"
+        );
     }
 }

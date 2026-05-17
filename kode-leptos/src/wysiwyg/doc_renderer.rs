@@ -296,6 +296,52 @@ pub(crate) fn render_block_node(
         // Table sub-nodes at top level (shouldn't happen outside a table)
         NodeType::TableRow | NodeType::TableHeader | NodeType::TableCell => None,
 
+        // ── Block-level image ─────────────────────────────────────────
+        NodeType::ImageBlock => {
+            let src = match get_attr(&node.attrs, "src") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let alt = match get_attr(&node.attrs, "alt") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            Some(
+                view! {
+                    <div class="wysiwyg-image-block"
+                        contenteditable="false"
+                        data-pos-start=start
+                        data-pos-end={start + 1}>
+                        <img src=src alt=alt />
+                    </div>
+                }
+                .into_any(),
+            )
+        }
+
+        // ── Block-level file attachment ──────────────────────────────
+        NodeType::FileBlock => {
+            let href = match get_attr(&node.attrs, "href") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let filename = match get_attr(&node.attrs, "filename") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            Some(
+                view! {
+                    <div class="wysiwyg-file-block"
+                        contenteditable="false"
+                        data-pos-start=start
+                        data-pos-end={start + 1}>
+                        <a href=href.clone() target="_blank">{filename}</a>
+                    </div>
+                }
+                .into_any(),
+            )
+        }
+
         // ── Inline-only types at block level (shouldn't happen, but be safe)
         NodeType::Text | NodeType::HardBreak | NodeType::Image => None,
 
@@ -988,6 +1034,44 @@ fn block_node_to_html(
 
         // Table sub-nodes at top level (should not happen)
         NodeType::TableRow | NodeType::TableHeader | NodeType::TableCell => {}
+
+        // ── Block-level image ─────────────────────────────────────────
+        NodeType::ImageBlock => {
+            let src = match get_attr(&node.attrs, "src") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
+            let alt = match get_attr(&node.attrs, "alt") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
+            html.push_str(&format!(
+                "<div class=\"wysiwyg-image-block\" contenteditable=\"false\" \
+                 data-pos-start=\"{}\" data-pos-end=\"{}\">\
+                 <img src=\"{}\" alt=\"{}\" />\
+                 </div>",
+                start, start + 1, src, alt
+            ));
+        }
+
+        // ── Block-level file attachment ──────────────────────────────
+        NodeType::FileBlock => {
+            let href = match get_attr(&node.attrs, "href") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
+            let filename = match get_attr(&node.attrs, "filename") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
+            html.push_str(&format!(
+                "<div class=\"wysiwyg-file-block\" contenteditable=\"false\" \
+                 data-pos-start=\"{}\" data-pos-end=\"{}\">\
+                 <a href=\"{}\" target=\"_blank\">{}</a>\
+                 </div>",
+                start, start + 1, href, filename
+            ));
+        }
 
         // Inline-only types at block level (should not happen)
         NodeType::Text | NodeType::HardBreak | NodeType::Image => {}
