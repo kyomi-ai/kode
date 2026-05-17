@@ -461,4 +461,43 @@ impl DocState {
             }
         }
     }
+
+    /// Insert a block-level leaf node (e.g., upload placeholder) at the given
+    /// position. If the position is inside a textblock, inserts after the
+    /// containing block. If between blocks, inserts directly.
+    pub fn insert_block_node(&mut self, pos: usize, node: Node) {
+        self.push_undo();
+
+        let resolved = self.doc.resolve(pos);
+
+        let insert_pos = if resolved.parent().node_type.is_textblock() {
+            // Inside a textblock — insert after it.
+            resolved.after(resolved.depth)
+        } else {
+            // At a gap between blocks — insert directly.
+            pos
+        };
+
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.insert(insert_pos, Fragment::from_node(node)).is_ok() {
+            self.doc = tr.doc;
+            // Place cursor after the inserted node.
+            self.selection = Selection::cursor(insert_pos + 1);
+        }
+        self.redo_stack.clear();
+    }
+
+    /// Atomically replace a block-level leaf node at `pos` with `replacement`.
+    /// This is a single undo entry (delete + insert together).
+    pub fn replace_block_node(&mut self, pos: usize, replacement: Node) {
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(pos, pos + 1).is_ok()
+            && tr.insert(pos, Fragment::from_node(replacement)).is_ok()
+        {
+            self.doc = tr.doc;
+            self.selection = Selection::cursor(pos + 1);
+        }
+        self.redo_stack.clear();
+    }
 }

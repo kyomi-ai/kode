@@ -29,6 +29,10 @@ pub enum NodeType {
     HardBreak,
     /// An image (inline leaf, attrs: src, alt, title).
     Image,
+    /// A block-level image (leaf block, attrs: src, alt, attachment_id, width, height).
+    ImageBlock,
+    /// A block-level file attachment (leaf block, attrs: href, filename, attachment_id, size_bytes, content_type).
+    FileBlock,
     /// A table block.
     Table,
     /// A table row (inside Table).
@@ -39,6 +43,8 @@ pub enum NodeType {
     TableCell,
     /// A text node (inline leaf, content in `Node::text`).
     Text,
+    /// A transient upload placeholder (block leaf, never serialized to markdown).
+    UploadPlaceholder,
 }
 
 impl NodeType {
@@ -57,6 +63,9 @@ impl NodeType {
                 | NodeType::ListItem
                 | NodeType::CodeBlock
                 | NodeType::HorizontalRule
+                | NodeType::ImageBlock
+                | NodeType::FileBlock
+                | NodeType::UploadPlaceholder
                 | NodeType::Table
                 | NodeType::TableRow
                 | NodeType::TableHeader
@@ -92,7 +101,13 @@ impl NodeType {
     pub fn is_leaf(self) -> bool {
         matches!(
             self,
-            NodeType::HorizontalRule | NodeType::HardBreak | NodeType::Image | NodeType::Text
+            NodeType::HorizontalRule
+                | NodeType::HardBreak
+                | NodeType::Image
+                | NodeType::ImageBlock
+                | NodeType::FileBlock
+                | NodeType::UploadPlaceholder
+                | NodeType::Text
         )
     }
 
@@ -117,6 +132,9 @@ mod tests {
         assert!(NodeType::ListItem.is_block());
         assert!(NodeType::CodeBlock.is_block());
         assert!(NodeType::HorizontalRule.is_block());
+        assert!(NodeType::ImageBlock.is_block());
+        assert!(NodeType::FileBlock.is_block());
+        assert!(NodeType::UploadPlaceholder.is_block());
         assert!(NodeType::Table.is_block());
         assert!(NodeType::TableRow.is_block());
         assert!(NodeType::TableHeader.is_block());
@@ -159,6 +177,9 @@ mod tests {
         assert!(NodeType::HorizontalRule.is_leaf());
         assert!(NodeType::HardBreak.is_leaf());
         assert!(NodeType::Image.is_leaf());
+        assert!(NodeType::ImageBlock.is_leaf());
+        assert!(NodeType::FileBlock.is_leaf());
+        assert!(NodeType::UploadPlaceholder.is_leaf());
         assert!(NodeType::Text.is_leaf());
 
         assert!(!NodeType::Doc.is_leaf());
@@ -185,6 +206,9 @@ mod tests {
             NodeType::ListItem,
             NodeType::CodeBlock,
             NodeType::HorizontalRule,
+            NodeType::ImageBlock,
+            NodeType::FileBlock,
+            NodeType::UploadPlaceholder,
             NodeType::Table,
             NodeType::TableRow,
             NodeType::TableHeader,
@@ -274,5 +298,22 @@ mod validation_tests {
     fn leaves_contain_nothing() {
         assert!(!can_contain(NodeType::HorizontalRule, NodeType::Text));
         assert!(!can_contain(NodeType::Text, NodeType::Text));
+        assert!(!can_contain(NodeType::ImageBlock, NodeType::Text));
+        assert!(!can_contain(NodeType::FileBlock, NodeType::Text));
+        assert!(!can_contain(NodeType::UploadPlaceholder, NodeType::Text));
+    }
+
+    #[test]
+    fn image_block_and_file_block_in_containers() {
+        assert!(can_contain(NodeType::Doc, NodeType::ImageBlock));
+        assert!(can_contain(NodeType::Doc, NodeType::FileBlock));
+        assert!(can_contain(NodeType::ListItem, NodeType::ImageBlock));
+        assert!(can_contain(NodeType::ListItem, NodeType::FileBlock));
+        assert!(can_contain(NodeType::Blockquote, NodeType::ImageBlock));
+        assert!(can_contain(NodeType::Blockquote, NodeType::FileBlock));
+
+        // They cannot be inside inline containers
+        assert!(!can_contain(NodeType::Paragraph, NodeType::ImageBlock));
+        assert!(!can_contain(NodeType::Paragraph, NodeType::FileBlock));
     }
 }

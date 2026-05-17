@@ -63,6 +63,24 @@ impl DocState {
         }
     }
 
+    /// Delete a specific range in the document and place the cursor at
+    /// `from` (adjusted into the nearest textblock). Used by the editor's
+    /// attachment delete button click handler.
+    pub fn delete_range(&mut self, from: usize, to: usize) {
+        if from >= to {
+            return;
+        }
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(from, to).is_ok() {
+            self.doc = tr.doc;
+            self.selection = Selection::cursor(
+                self.adjust_into_textblock(from.min(self.doc.content.size())),
+            );
+        }
+        self.redo_stack.clear();
+    }
+
     /// Delete the selection, or delete one character before the cursor (backspace).
     pub fn backspace(&mut self) {
         let from = self.adjust_into_textblock(self.selection.from());

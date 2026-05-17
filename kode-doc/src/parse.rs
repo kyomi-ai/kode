@@ -8,8 +8,8 @@ use std::cell::RefCell;
 use arborium_tree_sitter::{Language, Parser};
 
 use crate::attrs::{
-    code_block_attrs, empty_attrs, heading_attrs, image_attrs, link_attrs, ordered_list_attrs,
-    table_cell_attrs,
+    code_block_attrs, empty_attrs, heading_attrs, image_attrs, image_block_attrs, link_attrs,
+    ordered_list_attrs, table_cell_attrs,
 };
 use crate::fragment::Fragment;
 use crate::mark::{Mark, MarkType};
@@ -29,11 +29,27 @@ thread_local! {
     });
 }
 
+/// Configuration for markdown parsing behavior.
+#[derive(Clone, Debug, Default)]
+pub struct MarkdownConfig {
+    /// URL patterns that cause links to be parsed as FileBlock nodes.
+    /// A link `[text](url)` becomes a FileBlock if `url` contains any of these patterns.
+    pub file_link_patterns: Vec<String>,
+}
+
 /// Parse a markdown string into a kode-doc document tree.
 ///
 /// Uses tree-sitter-markdown to parse the source, then walks the CST
 /// to build a typed document tree with proper node types and marks.
 pub fn parse_markdown(source: &str) -> Node {
+    parse_markdown_with_config(source, &MarkdownConfig::default())
+}
+
+/// Parse a markdown string into a kode-doc document tree with custom configuration.
+///
+/// Like [`parse_markdown`] but accepts a [`MarkdownConfig`] that controls
+/// behaviors like file link detection.
+pub fn parse_markdown_with_config(source: &str, config: &MarkdownConfig) -> Node {
     let tree = PARSER.with(|p| p.borrow_mut().parse(source, None));
 
     let Some(tree) = tree else {
@@ -41,14 +57,18 @@ pub fn parse_markdown(source: &str) -> Node {
     };
 
     let root = tree.root_node();
-    let children = convert_block_children(&root, source);
+    let children = convert_block_children(&root, source, config);
     Node::branch(NodeType::Doc, Fragment::from_vec(children))
 }
 
 // ── Block-level conversion ──────────────────────────────────────────────
 
 /// Convert all named children of a tree-sitter node into kode-doc nodes.
-fn convert_block_children(node: &arborium_tree_sitter::Node, source: &str) -> Vec<Node> {
+fn convert_block_children(
+    node: &arborium_tree_sitter::Node,
+    source: &str,
+    config: &MarkdownConfig,
+) -> Vec<Node> {
     let mut result = Vec::new();
     let mut cursor = node.walk();
     let mut prev_end_byte: Option<usize> = None;
@@ -71,10 +91,10 @@ fn convert_block_children(node: &arborium_tree_sitter::Node, source: &str) -> Ve
         match kind {
             // Flatten containers: recurse into sections instead of wrapping
             "document" | "section" => {
-                result.extend(convert_block_children(&child, source));
+                result.extend(convert_block_children(&child, source, config));
             }
             _ => {
-                if let Some(doc_node) = convert_block_node(&child, source) {
+                if let Some(doc_node) = convert_block_node(&child, source, config) {
                     result.push(doc_node);
                 }
             }
@@ -86,7 +106,11 @@ fn convert_block_children(node: &arborium_tree_sitter::Node, source: &str) -> Ve
 }
 
 /// Convert a single tree-sitter block node into a kode-doc Node.
-fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option<Node> {
+fn convert_block_node(
+    node: &arborium_tree_sitter::Node,
+    source: &str,
+    config: &MarkdownConfig,
+) -> Option<Node> {
     match node.kind() {
         "paragraph" => {
             let text = node_text(node, source);
@@ -95,6 +119,53 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
                 // Empty paragraph: still produce a node with no children
                 Some(Node::branch(NodeType::Paragraph, Fragment::empty()))
             } else {
+                // Image promotion: if the paragraph contains exactly one inline
+                // Image node (and nothing else), promote it to a block-level ImageBlock.
+                if inlines.len() == 1 && inlines[0].node_type == NodeType::Image {
+                    let img = &inlines[0];
+                    let src = match crate::attrs::get_attr(&img.attrs, "src") {
+                        Some(crate::attrs::AttrValue::String(s)) => s.clone(),
+                        _ => String::new(),
+                    };
+                    let alt = match crate::attrs::get_attr(&img.attrs, "alt") {
+                        Some(crate::attrs::AttrValue::String(s)) => s.clone(),
+                        _ => String::new(),
+                    };
+                    return Some(Node::leaf_with_attrs(
+                        NodeType::ImageBlock,
+                        image_block_attrs(&src, &alt, None, None, None),
+                    ));
+                }
+
+                // File link detection: if the paragraph contains exactly one text
+                // node with a Link mark whose href matches a file_link_pattern,
+                // convert to a FileBlock.
+                if !config.file_link_patterns.is_empty() && inlines.len() == 1 {
+                    let node_ref = &inlines[0];
+                    if node_ref.node_type == NodeType::Text && node_ref.marks.len() == 1 {
+                        let mark = &node_ref.marks[0];
+                        if mark.mark_type == crate::mark::MarkType::Link {
+                            let href = match crate::attrs::get_attr(&mark.attrs, "href") {
+                                Some(crate::attrs::AttrValue::String(s)) => s.clone(),
+                                _ => String::new(),
+                            };
+                            let matches_pattern = config
+                                .file_link_patterns
+                                .iter()
+                                .any(|pattern| href.contains(pattern.as_str()));
+                            if matches_pattern {
+                                let filename = node_ref.text().unwrap_or("").to_string();
+                                return Some(Node::leaf_with_attrs(
+                                    NodeType::FileBlock,
+                                    crate::attrs::file_block_attrs(
+                                        &href, &filename, None, None, None,
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+
                 Some(Node::branch(
                     NodeType::Paragraph,
                     Fragment::from_vec(inlines),
@@ -142,7 +213,7 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
                 })
                 .unwrap_or(false);
 
-            let items = convert_list_items(node, source);
+            let items = convert_list_items(node, source, config);
 
             if is_ordered {
                 let start = detect_ordered_list_start(node, source);
@@ -160,7 +231,7 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
         }
 
         "block_quote" => {
-            let children = convert_block_children(node, source);
+            let children = convert_block_children(node, source, config);
             Some(Node::branch(
                 NodeType::Blockquote,
                 Fragment::from_vec(children),
@@ -263,13 +334,17 @@ fn convert_block_node(node: &arborium_tree_sitter::Node, source: &str) -> Option
 }
 
 /// Convert list_item children of a list node.
-fn convert_list_items(list_node: &arborium_tree_sitter::Node, source: &str) -> Vec<Node> {
+fn convert_list_items(
+    list_node: &arborium_tree_sitter::Node,
+    source: &str,
+    config: &MarkdownConfig,
+) -> Vec<Node> {
     let mut items = Vec::new();
     let mut cursor = list_node.walk();
 
     for child in list_node.named_children(&mut cursor) {
         if child.kind() == "list_item" {
-            let block_children = convert_block_children(&child, source);
+            let block_children = convert_block_children(&child, source, config);
             items.push(Node::branch(
                 NodeType::ListItem,
                 Fragment::from_vec(block_children),
@@ -1356,12 +1431,11 @@ mod tests {
 
     #[test]
     fn parse_image() {
+        // A standalone image (sole content of a paragraph) is promoted to ImageBlock.
         let doc = parse_markdown("![alt text](image.png)\n");
-        let para = doc.child(0);
+        let img = doc.child(0);
 
-        assert_eq!(para.child_count(), 1);
-        let img = para.child(0);
-        assert_eq!(img.node_type, NodeType::Image);
+        assert_eq!(img.node_type, NodeType::ImageBlock);
         assert_eq!(
             get_attr(&img.attrs, "src"),
             Some(&AttrValue::String("image.png".to_string()))
@@ -1369,6 +1443,20 @@ mod tests {
         assert_eq!(
             get_attr(&img.attrs, "alt"),
             Some(&AttrValue::String("alt text".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_image_inline_in_text() {
+        // An image within surrounding text remains inline.
+        let doc = parse_markdown("See ![photo](pic.png) here\n");
+        let para = doc.child(0);
+        assert_eq!(para.node_type, NodeType::Paragraph);
+        assert_eq!(para.child_count(), 3);
+        assert_eq!(para.child(1).node_type, NodeType::Image);
+        assert_eq!(
+            get_attr(&para.child(1).attrs, "src"),
+            Some(&AttrValue::String("pic.png".to_string()))
         );
     }
 
@@ -1834,5 +1922,176 @@ mod code_fence_content_tests {
                 text
             );
         }
+    }
+}
+
+// ── ImageBlock and FileBlock parsing tests ────────────────────────────────────
+
+#[cfg(test)]
+mod image_block_tests {
+    use super::*;
+    use crate::attrs::{get_attr, AttrValue};
+
+    #[test]
+    fn image_only_paragraph_promoted_to_image_block() {
+        // A paragraph containing ONLY an image should be promoted to ImageBlock.
+        let doc = parse_markdown("![A photo](photo.png)\n");
+        assert_eq!(doc.child_count(), 1);
+
+        let img = doc.child(0);
+        assert_eq!(img.node_type, NodeType::ImageBlock);
+        assert_eq!(
+            get_attr(&img.attrs, "src"),
+            Some(&AttrValue::String("photo.png".to_string()))
+        );
+        assert_eq!(
+            get_attr(&img.attrs, "alt"),
+            Some(&AttrValue::String("A photo".to_string()))
+        );
+    }
+
+    #[test]
+    fn image_with_surrounding_text_stays_inline() {
+        // A paragraph with text alongside an image should remain a paragraph.
+        let doc = parse_markdown("See ![img](pic.png) here\n");
+        assert_eq!(doc.child_count(), 1);
+
+        let para = doc.child(0);
+        assert_eq!(para.node_type, NodeType::Paragraph);
+        // Should have: "See " (text), Image, " here" (text)
+        assert_eq!(para.child_count(), 3);
+        assert_eq!(para.child(1).node_type, NodeType::Image);
+    }
+
+    #[test]
+    fn image_block_round_trip() {
+        // ImageBlock serializes as `![alt](src)` — same as inline but at block level.
+        // When re-parsed, a standalone image paragraph gets promoted back.
+        let doc = parse_markdown("![alt text](image.png)\n");
+        assert_eq!(doc.child(0).node_type, NodeType::ImageBlock);
+
+        let serialized = crate::serialize::serialize_markdown(&doc);
+        assert_eq!(serialized, "![alt text](image.png)");
+
+        // Re-parsing the serialized form should give us ImageBlock again
+        let doc2 = parse_markdown(&serialized);
+        assert_eq!(doc2.child(0).node_type, NodeType::ImageBlock);
+    }
+
+    #[test]
+    fn image_block_among_other_blocks() {
+        let doc = parse_markdown("# Title\n\n![photo](pic.png)\n\nSome text");
+        assert_eq!(doc.child_count(), 3);
+        assert_eq!(doc.child(0).node_type, NodeType::Heading);
+        assert_eq!(doc.child(1).node_type, NodeType::ImageBlock);
+        assert_eq!(doc.child(2).node_type, NodeType::Paragraph);
+    }
+}
+
+#[cfg(test)]
+mod file_block_tests {
+    use super::*;
+    use crate::attrs::{get_attr, AttrValue};
+
+    #[test]
+    fn link_matching_pattern_becomes_file_block() {
+        let config = MarkdownConfig {
+            file_link_patterns: vec!["/attachments/".to_string()],
+        };
+        let doc = parse_markdown_with_config(
+            "[report.pdf](/attachments/abc123/report.pdf)\n",
+            &config,
+        );
+        assert_eq!(doc.child_count(), 1);
+
+        let file = doc.child(0);
+        assert_eq!(file.node_type, NodeType::FileBlock);
+        assert_eq!(
+            get_attr(&file.attrs, "href"),
+            Some(&AttrValue::String(
+                "/attachments/abc123/report.pdf".to_string()
+            ))
+        );
+        assert_eq!(
+            get_attr(&file.attrs, "filename"),
+            Some(&AttrValue::String("report.pdf".to_string()))
+        );
+    }
+
+    #[test]
+    fn link_not_matching_pattern_stays_as_link() {
+        let config = MarkdownConfig {
+            file_link_patterns: vec!["/attachments/".to_string()],
+        };
+        let doc = parse_markdown_with_config(
+            "[click here](https://example.com)\n",
+            &config,
+        );
+        assert_eq!(doc.child_count(), 1);
+
+        let para = doc.child(0);
+        assert_eq!(para.node_type, NodeType::Paragraph);
+        let link_node = para.child(0);
+        assert_eq!(link_node.node_type, NodeType::Text);
+        assert_eq!(link_node.marks.len(), 1);
+        assert_eq!(link_node.marks[0].mark_type, crate::mark::MarkType::Link);
+    }
+
+    #[test]
+    fn link_with_no_config_stays_as_link() {
+        // Default config has no patterns — links are never promoted to FileBlock.
+        let doc = parse_markdown("[report.pdf](/attachments/abc123/report.pdf)\n");
+        assert_eq!(doc.child_count(), 1);
+
+        let para = doc.child(0);
+        assert_eq!(para.node_type, NodeType::Paragraph);
+    }
+
+    #[test]
+    fn file_block_round_trip() {
+        let config = MarkdownConfig {
+            file_link_patterns: vec!["/attachments/".to_string()],
+        };
+        let doc = parse_markdown_with_config(
+            "[doc.pdf](/attachments/file-001/doc.pdf)\n",
+            &config,
+        );
+        assert_eq!(doc.child(0).node_type, NodeType::FileBlock);
+
+        let serialized = crate::serialize::serialize_markdown(&doc);
+        assert_eq!(serialized, "[doc.pdf](/attachments/file-001/doc.pdf)");
+
+        // Re-parsing with the same config should give FileBlock again
+        let doc2 = parse_markdown_with_config(&serialized, &config);
+        assert_eq!(doc2.child(0).node_type, NodeType::FileBlock);
+    }
+
+    #[test]
+    fn link_with_surrounding_text_not_promoted() {
+        // FileBlock detection only works when the link is the only content
+        let config = MarkdownConfig {
+            file_link_patterns: vec!["/attachments/".to_string()],
+        };
+        let doc = parse_markdown_with_config(
+            "Download [report.pdf](/attachments/abc/report.pdf) here\n",
+            &config,
+        );
+        assert_eq!(doc.child_count(), 1);
+        assert_eq!(doc.child(0).node_type, NodeType::Paragraph);
+    }
+
+    #[test]
+    fn multiple_file_link_patterns() {
+        let config = MarkdownConfig {
+            file_link_patterns: vec![
+                "/attachments/".to_string(),
+                "/uploads/".to_string(),
+            ],
+        };
+        let doc = parse_markdown_with_config(
+            "[file.zip](/uploads/xyz/file.zip)\n",
+            &config,
+        );
+        assert_eq!(doc.child(0).node_type, NodeType::FileBlock);
     }
 }
