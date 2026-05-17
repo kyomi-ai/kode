@@ -100,6 +100,16 @@ pub fn TreeWysiwygEditor(
     /// Host app can open a lightbox or download.
     #[prop(optional)]
     on_click_attachment: Option<Arc<dyn Fn(ClickAttachmentRequest) + Send + Sync>>,
+    /// Called when the user drops, pastes, or picks a file for upload.
+    /// The host app receives the file name, size, and type, plus a placeholder_id
+    /// to correlate with the upload_complete signal.
+    #[prop(optional)]
+    on_upload: Option<Arc<dyn Fn(super::attachment::UploadTrigger) + Send + Sync>>,
+    /// Signal for the host app to report upload completion.
+    /// Write `Some(UploadComplete { ... })` to replace the placeholder with the real node,
+    /// or write with `insert: None` to remove the placeholder (upload failed).
+    #[prop(optional)]
+    upload_complete: Option<RwSignal<Option<super::attachment::UploadComplete>>>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
     let atomic_langs: HashSet<String> = extensions
@@ -209,6 +219,42 @@ pub fn TreeWysiwygEditor(
                     cb(md);
                 }
                 inject_signal.set(None);
+            }
+        });
+    }
+
+    // ── upload_complete: replace placeholder with real node or remove it ──
+    if let (Some(upload_complete_signal), false) = (upload_complete, readonly) {
+        let doc_upload = doc_state.clone();
+        let on_change_upload = on_change.clone();
+        Effect::new(move |_| {
+            let Some(complete) = upload_complete_signal.get() else { return };
+            upload_complete_signal.set(None); // Consume the signal
+
+            let Ok(mut ds) = doc_upload.lock() else { return };
+
+            // Find the placeholder by scanning top-level doc children for an
+            // UploadPlaceholder with matching placeholder_id attr.
+            let placeholder_pos = find_placeholder_position(ds.doc(), &complete.placeholder_id);
+            let Some(pos) = placeholder_pos else { return };
+
+            match complete.insert {
+                Some(ref attachment) => {
+                    // Atomically replace placeholder with the real node (single undo entry).
+                    let node = attachment_insert_to_node(attachment);
+                    ds.replace_block_node(pos, node);
+                }
+                None => {
+                    // Remove placeholder (upload failed).
+                    ds.delete_range(pos, pos + 1);
+                }
+            }
+
+            let md = ds.to_markdown();
+            drop(ds);
+            version.update(|v| *v += 1);
+            if let Some(ref cb) = on_change_upload {
+                cb(md);
             }
         });
     }
@@ -527,6 +573,7 @@ pub fn TreeWysiwygEditor(
         // ── Paste handler (fallback for browsers without dataTransfer on beforeinput)
         let doc_paste = doc_state.clone();
         let notify_paste = notify.clone();
+        let on_upload_paste = on_upload.clone();
         let paste_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
             if readonly { return; }
             // Only handle paste here if beforeinput didn't handle it.
@@ -539,6 +586,48 @@ pub fn TreeWysiwygEditor(
             ev.prevent_default();
             let ev: web_sys::ClipboardEvent = ev.unchecked_into();
             let Some(dt) = ev.clipboard_data() else { return };
+
+            // Check for file paste (e.g., screenshot) — only when on_upload is configured.
+            if let Some(ref upload_fn) = on_upload_paste {
+                let items = dt.items();
+                let mut handled_file = false;
+                for i in 0..items.length() {
+                    let Some(item) = items.get(i) else { continue };
+                    if item.kind() == "file" {
+                        if let Ok(Some(file)) = item.get_as_file() {
+                            handled_file = true;
+                            let placeholder_id = format!("upload-{}-{}", js_sys::Date::now() as u64, i);
+
+                            let Ok(mut ds) = doc_paste.lock() else { return };
+                            let placeholder_attrs = {
+                                let mut attrs = kode_doc::Attrs::new();
+                                attrs.push(("placeholder_id".to_string(), kode_doc::AttrValue::String(placeholder_id.clone())));
+                                attrs
+                            };
+                            let placeholder = kode_doc::Node::leaf_with_attrs(
+                                NodeType::UploadPlaceholder,
+                                placeholder_attrs,
+                            );
+                            let pos = ds.selection().from();
+                            ds.insert_block_node(pos, placeholder);
+                            let new_md = ds.to_markdown();
+                            drop(ds);
+                            (notify_paste)(Some(new_md));
+
+                            let trigger = super::attachment::UploadTrigger {
+                                name: file.name(),
+                                size: file.size() as u64,
+                                content_type: file.type_(),
+                                placeholder_id,
+                            };
+                            upload_fn(trigger);
+                        }
+                    }
+                }
+                if handled_file {
+                    return;
+                }
+            }
 
             let html_data = dt.get_data("text/html").unwrap_or_default();
             let has_kode_md = html_data.contains("data-kode-md");
@@ -604,6 +693,104 @@ pub fn TreeWysiwygEditor(
                 drop(cp_wrap);
                 drop(ct_wrap);
                 drop(pa_wrap);
+            });
+        });
+    }
+
+    // ── File upload drag-and-drop handlers ──────────────────────────────
+    if let Some(ref upload_fn) = on_upload {
+        let editor_dragover = editor_ref;
+        let dragover_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            ev.prevent_default(); // Required to allow drop
+            if let Some(el) = editor_dragover.get() {
+                let _ = el.class_list().add_1("wysiwyg-drag-over");
+            }
+        });
+
+        let editor_dragleave = editor_ref;
+        let dragleave_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            ev.prevent_default();
+            if let Some(el) = editor_dragleave.get() {
+                let _ = el.class_list().remove_1("wysiwyg-drag-over");
+            }
+        });
+
+        let doc_drop = doc_state.clone();
+        let notify_drop = notify.clone();
+        let upload_fn_drop = Arc::clone(upload_fn);
+        let editor_drop = editor_ref;
+        let drop_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            ev.prevent_default();
+            if readonly { return; }
+
+            // Remove drag-over class.
+            if let Some(el) = editor_drop.get() {
+                let _ = el.class_list().remove_1("wysiwyg-drag-over");
+            }
+
+            let ev: web_sys::DragEvent = ev.unchecked_into();
+            let Some(dt) = ev.data_transfer() else { return };
+            let Some(files) = dt.files() else { return };
+
+            for i in 0..files.length() {
+                let Some(file) = files.get(i) else { continue };
+
+                let placeholder_id = format!("upload-{}-{}", js_sys::Date::now() as u64, i);
+
+                let Ok(mut ds) = doc_drop.lock() else { return };
+                let placeholder_attrs = {
+                    let mut attrs = kode_doc::Attrs::new();
+                    attrs.push(("placeholder_id".to_string(), kode_doc::AttrValue::String(placeholder_id.clone())));
+                    attrs
+                };
+                let placeholder = kode_doc::Node::leaf_with_attrs(
+                    NodeType::UploadPlaceholder,
+                    placeholder_attrs,
+                );
+                let pos = ds.selection().from();
+                ds.insert_block_node(pos, placeholder);
+                let new_md = ds.to_markdown();
+                drop(ds);
+                (notify_drop)(Some(new_md));
+
+                let trigger = super::attachment::UploadTrigger {
+                    name: file.name(),
+                    size: file.size() as u64,
+                    content_type: file.type_(),
+                    placeholder_id,
+                };
+                upload_fn_drop(trigger);
+            }
+        });
+
+        let upload_closures = std::cell::RefCell::new(Some((dragover_cb, dragleave_cb, drop_cb)));
+        let editor_upload_attach = editor_ref;
+
+        Effect::new(move |_| {
+            let Some(el) = editor_upload_attach.get() else { return };
+            let Some((dov_cb, dlv_cb, drp_cb)) = upload_closures.borrow_mut().take() else {
+                return; // Already attached.
+            };
+            let target: &web_sys::EventTarget = el.as_ref();
+            let _ = target.add_event_listener_with_callback("dragover", dov_cb.as_ref().unchecked_ref());
+            let _ = target.add_event_listener_with_callback("dragleave", dlv_cb.as_ref().unchecked_ref());
+            let _ = target.add_event_listener_with_callback("drop", drp_cb.as_ref().unchecked_ref());
+
+            let dov_fn: js_sys::Function = dov_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let dlv_fn: js_sys::Function = dlv_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let drp_fn: js_sys::Function = drp_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let dov_wrap = send_wrapper::SendWrapper::new(dov_cb);
+            let dlv_wrap = send_wrapper::SendWrapper::new(dlv_cb);
+            let drp_wrap = send_wrapper::SendWrapper::new(drp_cb);
+
+            let cleanup_el: web_sys::EventTarget = target.clone();
+            on_cleanup(move || {
+                let _ = cleanup_el.remove_event_listener_with_callback("dragover", &dov_fn);
+                let _ = cleanup_el.remove_event_listener_with_callback("dragleave", &dlv_fn);
+                let _ = cleanup_el.remove_event_listener_with_callback("drop", &drp_fn);
+                drop(dov_wrap);
+                drop(dlv_wrap);
+                drop(drp_wrap);
             });
         });
     }
@@ -3090,4 +3277,39 @@ fn find_container_child(
         current = node.parent_element();
     }
     None
+}
+
+/// Find the position of an UploadPlaceholder node with the given placeholder_id.
+/// Scans top-level doc children (position 0-based within the doc's content).
+fn find_placeholder_position(doc: &kode_doc::Node, placeholder_id: &str) -> Option<usize> {
+    let mut pos = 0;
+    for child in doc.content.iter() {
+        if child.node_type == NodeType::UploadPlaceholder {
+            if let Some(AttrValue::String(ref id)) = get_attr(&child.attrs, "placeholder_id") {
+                if id == placeholder_id {
+                    return Some(pos);
+                }
+            }
+        }
+        pos += child.node_size();
+    }
+    None
+}
+
+/// Convert an `AttachmentInsert` into the corresponding document node.
+fn attachment_insert_to_node(insert: &super::attachment::AttachmentInsert) -> kode_doc::Node {
+    match insert {
+        super::attachment::AttachmentInsert::Image { src, alt, attachment_id, width, height } => {
+            kode_doc::Node::leaf_with_attrs(
+                NodeType::ImageBlock,
+                kode_doc::attrs::image_block_attrs(src, alt, attachment_id.as_deref(), *width, *height),
+            )
+        }
+        super::attachment::AttachmentInsert::File { href, filename, attachment_id, size_bytes, content_type } => {
+            kode_doc::Node::leaf_with_attrs(
+                NodeType::FileBlock,
+                kode_doc::attrs::file_block_attrs(href, filename, attachment_id.as_deref(), *size_bytes, content_type.as_deref()),
+            )
+        }
+    }
 }

@@ -43,6 +43,8 @@ pub enum NodeType {
     TableCell,
     /// A text node (inline leaf, content in `Node::text`).
     Text,
+    /// A transient upload placeholder (block leaf, never serialized to markdown).
+    UploadPlaceholder,
 }
 
 impl NodeType {
@@ -63,6 +65,7 @@ impl NodeType {
                 | NodeType::HorizontalRule
                 | NodeType::ImageBlock
                 | NodeType::FileBlock
+                | NodeType::UploadPlaceholder
                 | NodeType::Table
                 | NodeType::TableRow
                 | NodeType::TableHeader
@@ -103,6 +106,7 @@ impl NodeType {
                 | NodeType::Image
                 | NodeType::ImageBlock
                 | NodeType::FileBlock
+                | NodeType::UploadPlaceholder
                 | NodeType::Text
         )
     }
@@ -130,6 +134,7 @@ mod tests {
         assert!(NodeType::HorizontalRule.is_block());
         assert!(NodeType::ImageBlock.is_block());
         assert!(NodeType::FileBlock.is_block());
+        assert!(NodeType::UploadPlaceholder.is_block());
         assert!(NodeType::Table.is_block());
         assert!(NodeType::TableRow.is_block());
         assert!(NodeType::TableHeader.is_block());
@@ -174,6 +179,7 @@ mod tests {
         assert!(NodeType::Image.is_leaf());
         assert!(NodeType::ImageBlock.is_leaf());
         assert!(NodeType::FileBlock.is_leaf());
+        assert!(NodeType::UploadPlaceholder.is_leaf());
         assert!(NodeType::Text.is_leaf());
 
         assert!(!NodeType::Doc.is_leaf());
@@ -202,6 +208,7 @@ mod tests {
             NodeType::HorizontalRule,
             NodeType::ImageBlock,
             NodeType::FileBlock,
+            NodeType::UploadPlaceholder,
             NodeType::Table,
             NodeType::TableRow,
             NodeType::TableHeader,
@@ -293,6 +300,7 @@ mod validation_tests {
         assert!(!can_contain(NodeType::Text, NodeType::Text));
         assert!(!can_contain(NodeType::ImageBlock, NodeType::Text));
         assert!(!can_contain(NodeType::FileBlock, NodeType::Text));
+        assert!(!can_contain(NodeType::UploadPlaceholder, NodeType::Text));
     }
 
     #[test]

@@ -95,6 +95,9 @@ fn serialize_node(node: &Node, out: &mut String, ctx: &BlockContext) {
         }
         // TableRow, TableHeader, TableCell are handled by serialize_table
         NodeType::TableRow | NodeType::TableHeader | NodeType::TableCell => {}
+        NodeType::UploadPlaceholder => {
+            // Transient placeholder — not serialized to markdown.
+        }
     }
 }
 
@@ -675,6 +678,11 @@ fn reverse_pos_map_node(node: &Node, state: &mut ReversePosMapState) {
             state.byte_offset += 1 + filename.len() + 2 + href.len() + 1;
             state.check();
         }
+        NodeType::UploadPlaceholder => {
+            // Transient leaf block: 1 tree position, no markdown bytes.
+            state.tree_pos += 1;
+            state.check();
+        }
         _ => {
             // Branch nodes.
             state.tree_pos += 1;
@@ -936,6 +944,13 @@ fn pos_map_node(node: &Node, state: &mut PosMapState) {
             };
             // "[filename](href)"
             state.byte_offset += 1 + filename.len() + 2 + href.len() + 1;
+        }
+        NodeType::UploadPlaceholder => {
+            // Transient leaf block: 1 tree position, no markdown bytes.
+            if state.check() {
+                return;
+            }
+            state.tree_pos += 1;
         }
         _ => {
             // Branch nodes: opening token (+1 tree pos, variable markdown bytes),

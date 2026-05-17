@@ -317,6 +317,7 @@ pub(crate) fn render_block_node(
                 _ => String::new(),
             };
             let data_src = src.clone();
+            let img_src = src;
             Some(
                 view! {
                     <div class="wysiwyg-image-block"
@@ -325,7 +326,7 @@ pub(crate) fn render_block_node(
                         data-pos-end={start + 1}
                         data-src=data_src
                         data-attachment-id=attachment_id>
-                        <img src=src alt=alt />
+                        <img src=img_src alt=alt />
                         <button class="wysiwyg-attachment-delete"
                             aria-label="Delete attachment"
                             tabindex="-1"
@@ -379,6 +380,19 @@ pub(crate) fn render_block_node(
                 .into_any(),
             )
         }
+
+        // ── Upload placeholder ─────────────────────────────────────────
+        NodeType::UploadPlaceholder => Some(
+            view! {
+                <div class="wysiwyg-upload-placeholder"
+                    contenteditable="false"
+                    data-pos-start=start
+                    data-pos-end={start + 1}>
+                    <div class="wysiwyg-upload-placeholder-inner"></div>
+                </div>
+            }
+            .into_any(),
+        ),
 
         // ── Inline-only types at block level (shouldn't happen, but be safe)
         NodeType::Text | NodeType::HardBreak | NodeType::Image => None,
@@ -1130,6 +1144,17 @@ fn block_node_to_html(
                  {size_html}\
                  <button class=\"wysiwyg-attachment-delete\" aria-label=\"Delete attachment\" \
                  tabindex=\"-1\">{DELETE_ICON_SVG}</button></div>",
+                start + 1
+            ));
+        }
+
+        // ── Upload placeholder ─────────────────────────────────────────
+        NodeType::UploadPlaceholder => {
+            html.push_str(&format!(
+                "<div class=\"wysiwyg-upload-placeholder\" contenteditable=\"false\" \
+                 data-pos-start=\"{start}\" data-pos-end=\"{}\">\
+                 <div class=\"wysiwyg-upload-placeholder-inner\"></div>\
+                 </div>",
                 start + 1
             ));
         }
