@@ -24,6 +24,12 @@ pub(crate) const COPY_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg
 /// Checkmark SVG icon shown after a successful copy-to-clipboard.
 pub(crate) const CHECK_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>"#;
 
+/// X/close SVG icon for the attachment delete button.
+const DELETE_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>"#;
+
+/// File icon SVG for the file block.
+const FILE_ICON_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>"#;
+
 /// Render a kode-doc document tree into Leptos views for the WYSIWYG editor.
 ///
 /// Each block node becomes a view with `data-pos-start` and `data-pos-end`
@@ -306,13 +312,24 @@ pub(crate) fn render_block_node(
                 Some(AttrValue::String(s)) => s.clone(),
                 _ => String::new(),
             };
+            let attachment_id = match get_attr(&node.attrs, "attachment_id") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let data_src = src.clone();
             Some(
                 view! {
                     <div class="wysiwyg-image-block"
                         contenteditable="false"
                         data-pos-start=start
-                        data-pos-end={start + 1}>
+                        data-pos-end={start + 1}
+                        data-src=data_src
+                        data-attachment-id=attachment_id>
                         <img src=src alt=alt />
+                        <button class="wysiwyg-attachment-delete"
+                            aria-label="Delete attachment"
+                            tabindex="-1"
+                            inner_html=DELETE_ICON_SVG />
                     </div>
                 }
                 .into_any(),
@@ -329,13 +346,34 @@ pub(crate) fn render_block_node(
                 Some(AttrValue::String(s)) => s.clone(),
                 _ => String::new(),
             };
+            let attachment_id = match get_attr(&node.attrs, "attachment_id") {
+                Some(AttrValue::String(s)) => s.clone(),
+                _ => String::new(),
+            };
+            let size_display = match get_attr(&node.attrs, "size_bytes") {
+                Some(AttrValue::Int(bytes)) => format_file_size(u64::try_from(*bytes).unwrap_or(0)),
+                _ => String::new(),
+            };
+            let size_view = if size_display.is_empty() {
+                view! { <span /> }.into_any()
+            } else {
+                view! { <span class="wysiwyg-file-size">{format!("({})", size_display)}</span> }.into_any()
+            };
             Some(
                 view! {
                     <div class="wysiwyg-file-block"
                         contenteditable="false"
                         data-pos-start=start
-                        data-pos-end={start + 1}>
-                        <a href=href.clone() target="_blank">{filename}</a>
+                        data-pos-end={start + 1}
+                        data-href=href.clone()
+                        data-attachment-id=attachment_id>
+                        <span class="wysiwyg-file-icon" inner_html=FILE_ICON_SVG />
+                        <span class="wysiwyg-file-name">{filename}</span>
+                        {size_view}
+                        <button class="wysiwyg-attachment-delete"
+                            aria-label="Delete attachment"
+                            tabindex="-1"
+                            inner_html=DELETE_ICON_SVG />
                     </div>
                 }
                 .into_any(),
@@ -1045,12 +1083,18 @@ fn block_node_to_html(
                 Some(AttrValue::String(s)) => html_escape(s),
                 _ => String::new(),
             };
+            let attachment_id = match get_attr(&node.attrs, "attachment_id") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
             html.push_str(&format!(
                 "<div class=\"wysiwyg-image-block\" contenteditable=\"false\" \
-                 data-pos-start=\"{}\" data-pos-end=\"{}\">\
-                 <img src=\"{}\" alt=\"{}\" />\
-                 </div>",
-                start, start + 1, src, alt
+                 data-pos-start=\"{start}\" data-pos-end=\"{}\" \
+                 data-src=\"{src}\" data-attachment-id=\"{attachment_id}\">\
+                 <img src=\"{src}\" alt=\"{alt}\" />\
+                 <button class=\"wysiwyg-attachment-delete\" aria-label=\"Delete attachment\" \
+                 tabindex=\"-1\">{DELETE_ICON_SVG}</button></div>",
+                start + 1
             ));
         }
 
@@ -1064,12 +1108,29 @@ fn block_node_to_html(
                 Some(AttrValue::String(s)) => html_escape(s),
                 _ => String::new(),
             };
+            let attachment_id = match get_attr(&node.attrs, "attachment_id") {
+                Some(AttrValue::String(s)) => html_escape(s),
+                _ => String::new(),
+            };
+            let size_display = match get_attr(&node.attrs, "size_bytes") {
+                Some(AttrValue::Int(bytes)) => format_file_size(u64::try_from(*bytes).unwrap_or(0)),
+                _ => String::new(),
+            };
+            let size_html = if size_display.is_empty() {
+                String::new()
+            } else {
+                format!("<span class=\"wysiwyg-file-size\">({})</span>", html_escape(&size_display))
+            };
             html.push_str(&format!(
                 "<div class=\"wysiwyg-file-block\" contenteditable=\"false\" \
-                 data-pos-start=\"{}\" data-pos-end=\"{}\">\
-                 <a href=\"{}\" target=\"_blank\">{}</a>\
-                 </div>",
-                start, start + 1, href, filename
+                 data-pos-start=\"{start}\" data-pos-end=\"{}\" \
+                 data-href=\"{href}\" data-attachment-id=\"{attachment_id}\">\
+                 <span class=\"wysiwyg-file-icon\">{FILE_ICON_SVG}</span>\
+                 <span class=\"wysiwyg-file-name\">{filename}</span>\
+                 {size_html}\
+                 <button class=\"wysiwyg-attachment-delete\" aria-label=\"Delete attachment\" \
+                 tabindex=\"-1\">{DELETE_ICON_SVG}</button></div>",
+                start + 1
             ));
         }
 
@@ -1229,6 +1290,19 @@ fn table_cells_to_html(html: &mut String, row: &Node, content_start: usize, tag:
             inline = inline,
         ));
         pos += cell.node_size();
+    }
+}
+
+/// Format a byte count into a human-readable size string.
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 

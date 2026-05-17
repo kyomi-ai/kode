@@ -835,3 +835,92 @@ body.kode-dragging * {
 .wysiwyg-readonly .kode-gap-cursor {
     display: none;
 }
+
+/* ── Attachment blocks ─────────────────────────────────────────────── */
+
+.wysiwyg-image-block {
+    position: relative;
+    display: inline-block;
+    max-width: 300px;
+    margin: 4px 0;
+    border: 1px solid var(--kode-border, #e0e0e0);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.wysiwyg-image-block:hover {
+    border-color: var(--kode-accent, #3b82f6);
+}
+
+.wysiwyg-image-block img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+.wysiwyg-file-block {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    margin: 4px 0;
+    border: 1px solid var(--kode-border, #e0e0e0);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875em;
+    transition: border-color 0.15s;
+}
+
+.wysiwyg-file-block:hover {
+    border-color: var(--kode-accent, #3b82f6);
+}
+
+.wysiwyg-file-icon {
+    display: flex;
+    align-items: center;
+    color: var(--kode-fg-dim, #6b7280);
+}
+
+.wysiwyg-file-name {
+    color: var(--kode-fg-bright, #1f2937);
+    font-weight: 500;
+}
+
+.wysiwyg-file-size {
+    color: var(--kode-fg-dim, #6b7280);
+}
+
+.wysiwyg-attachment-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.wysiwyg-image-block:hover .wysiwyg-attachment-delete,
+.wysiwyg-file-block:hover .wysiwyg-attachment-delete {
+    display: flex;
+}
+
+.wysiwyg-attachment-delete:hover {
+    background: rgba(220, 38, 38, 0.8);
+}
+
+/* Hide delete button in readonly mode */
+.wysiwyg-readonly .wysiwyg-attachment-delete {
+    display: none !important;
+}

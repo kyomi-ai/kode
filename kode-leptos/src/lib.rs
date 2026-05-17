@@ -27,4 +27,4 @@ pub use markdown_editor_component::{EditorMode, MarkdownEditorComponent};
 pub use theme::{SyntaxTheme, Theme};
 pub use kode_markdown::FormattingState;
 pub use toolbar::{BuiltinButton, CustomToolbarButton, InjectCommand, SlashMenuItem, ToolbarItem, Toolbar, default_toolbar_items, default_slash_menu_items};
-pub use wysiwyg::TreeWysiwygEditor;
+pub use wysiwyg::{AttachmentNodeType, ClickAttachmentRequest, DeleteAttachmentRequest, TreeWysiwygEditor};

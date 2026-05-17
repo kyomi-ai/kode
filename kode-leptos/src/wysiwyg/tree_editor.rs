@@ -13,8 +13,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+use kode_doc::attrs::{AttrValue, get_attr};
 use kode_doc::mark::MarkType;
-use kode_doc::{DocState, FormattingState, GapSide, Selection};
+use kode_doc::{DocState, FormattingState, GapSide, NodeType, Selection};
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::AnyView;
 use wasm_bindgen::closure::Closure;
@@ -25,6 +26,7 @@ use crate::extension::{matches_key_descriptor, Extension, ExtensionKeyboardShort
 use crate::theme::Theme;
 use crate::toolbar::{InjectCommand, SlashMenuItem, ToolbarItem, default_slash_menu_items, default_toolbar_items, dispatch_builtin_action};
 
+use super::attachment::{AttachmentNodeType, ClickAttachmentRequest, DeleteAttachmentRequest};
 use super::clipboard::{html_escape, extract_kode_markdown};
 use super::doc_renderer::{doc_to_segments, RenderSegment};
 use super::dom_helpers::apply_md_command;
@@ -90,6 +92,14 @@ pub fn TreeWysiwygEditor(
     /// Read-only mode: disables editing, hides toolbars, suppresses callbacks.
     #[prop(default = false)]
     readonly: bool,
+    /// Called when user clicks the delete button on an attachment.
+    /// Host app should delete from storage; the node is removed from the document.
+    #[prop(optional)]
+    on_delete_attachment: Option<Arc<dyn Fn(DeleteAttachmentRequest) + Send + Sync>>,
+    /// Called when user clicks an image thumbnail or file chip.
+    /// Host app can open a lightbox or download.
+    #[prop(optional)]
+    on_click_attachment: Option<Arc<dyn Fn(ClickAttachmentRequest) + Send + Sync>>,
 ) -> impl IntoView {
     // ── State ────────────────────────────────────────────────────────────
     let atomic_langs: HashSet<String> = extensions
@@ -960,6 +970,7 @@ pub fn TreeWysiwygEditor(
     // ── Keydown ──────────────────────────────────────────────────────────
     let doc_key = doc_state.clone();
     let notify_key = notify.clone();
+    let on_delete_attachment_key = on_delete_attachment.clone();
     let extension_shortcuts_key: Arc<Vec<ExtensionKeyboardShortcut>> = Arc::clone(&extension_shortcuts);
     let keydown_handled_key = keydown_handled.clone();
     let ext_actions_key = Arc::clone(&ext_actions);
@@ -1173,10 +1184,66 @@ pub fn TreeWysiwygEditor(
                 true
             }
             "Backspace" => {
+                // Check if backspace will delete an attachment block.
+                if let Some(ref cb) = on_delete_attachment_key {
+                    let pos = ds.selection().from();
+                    let resolved = ds.doc().resolve(pos);
+                    if !resolved.parent().node_type.is_textblock() {
+                        // At a gap position, node_before might be an attachment.
+                        if let Some(node_before) = resolved.node_before() {
+                            if matches!(node_before.node_type, NodeType::ImageBlock | NodeType::FileBlock) {
+                                let req = build_delete_request(node_before);
+                                cb(req);
+                            }
+                        }
+                    } else if resolved.parent_offset == 0 && resolved.parent().content.size() > 0 {
+                        // At start of non-empty textblock: join_backward will delete a preceding atom.
+                        // (Empty paragraphs are deleted themselves, not the adjacent attachment.)
+                        let before_pos = resolved.before(resolved.depth);
+                        if before_pos > 0 {
+                            let before_resolved = ds.doc().resolve(before_pos);
+                            if let Some(prev_node) = before_resolved.node_before() {
+                                if matches!(prev_node.node_type, NodeType::ImageBlock | NodeType::FileBlock) {
+                                    let req = build_delete_request(prev_node);
+                                    cb(req);
+                                }
+                            }
+                        }
+                    }
+                }
                 ds.backspace();
                 true
             }
             "Delete" => {
+                // Check if delete-forward will delete an attachment block.
+                if let Some(ref cb) = on_delete_attachment_key {
+                    let pos = ds.selection().from();
+                    let resolved = ds.doc().resolve(pos);
+                    if !resolved.parent().node_type.is_textblock() {
+                        // Gap position: node_after might be an attachment.
+                        if let Some(node_after) = resolved.node_after() {
+                            if matches!(node_after.node_type, NodeType::ImageBlock | NodeType::FileBlock) {
+                                let req = build_delete_request(node_after);
+                                cb(req);
+                            }
+                        }
+                    } else if resolved.parent_offset == resolved.parent().content.size()
+                        && resolved.parent().content.size() > 0
+                    {
+                        // End of non-empty textblock: next sibling block might be an attachment.
+                        // (Empty paragraphs are deleted themselves, not the adjacent attachment.)
+                        let after_pos = resolved.after(resolved.depth);
+                        if after_pos < ds.doc().content.size() {
+                            let after_resolved = ds.doc().resolve(after_pos);
+                            if let Some(next_node) = after_resolved.node_after() {
+                                if matches!(next_node.node_type, NodeType::ImageBlock | NodeType::FileBlock) {
+                                    let req = build_delete_request(next_node);
+                                    cb(req);
+                                }
+                            }
+                        }
+                    }
+                }
                 ds.delete_forward();
                 true
             }
@@ -1724,6 +1791,12 @@ pub fn TreeWysiwygEditor(
     // ── Render ───────────────────────────────────────────────────────────
     let theme_css = move || theme.get().syntax_css("pre.kode-content");
 
+    // Clone attachment callbacks + doc_state for the click handler closure.
+    let on_delete_attachment_click = on_delete_attachment.clone();
+    let on_click_attachment_click = on_click_attachment.clone();
+    let doc_state_click = doc_state.clone();
+    let on_change_click = on_change.clone();
+
     view! {
         <style>{theme_css}</style>
         <style>{include_str!("../wysiwyg.css")}</style>
@@ -1750,12 +1823,24 @@ pub fn TreeWysiwygEditor(
                     let Some(target) = ev.target() else { return };
                     let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
-                    // Walk up to find the copy button (click may be on the SVG/path inside it)
+                    // Walk up from click target to identify the action.
                     let mut el = Some(target_el.clone());
                     let mut copy_btn: Option<web_sys::Element> = None;
+                    let mut delete_btn: Option<web_sys::Element> = None;
+                    let mut attachment_block: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
-                        if current.class_list().contains("wysiwyg-code-copy") {
+                        if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
+                            break;
+                        }
+                        if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
+                            delete_btn = Some(current.clone());
+                        }
+                        if attachment_block.is_none()
+                            && (current.class_list().contains("wysiwyg-image-block")
+                                || current.class_list().contains("wysiwyg-file-block"))
+                        {
+                            attachment_block = Some(current.clone());
                             break;
                         }
                         if current.class_list().contains("wysiwyg-scroll-container") {
@@ -1764,42 +1849,106 @@ pub fn TreeWysiwygEditor(
                         el = current.parent_element();
                     }
 
-                    let Some(btn) = copy_btn else { return };
+                    // ── Code copy button ────────────────────────────────────
+                    if let Some(btn) = copy_btn {
+                        ev.prevent_default();
+                        ev.stop_propagation();
 
-                    ev.prevent_default();
-                    ev.stop_propagation();
+                        let Some(pre) = btn.parent_element() else { return };
+                        let Some(code_el) = pre.query_selector("code").ok().flatten() else { return };
+                        let text = code_el.text_content().unwrap_or_default();
 
-                    // Find the sibling <code> element to get the raw text.
-                    // In the segment renderer the structure is <pre> > <button> + <code>.
-                    // In the view renderer it is <div> > <button> + <pre> > <code>.
-                    let Some(pre) = btn.parent_element() else { return };
-                    let Some(code_el) = pre.query_selector("code").ok().flatten() else { return };
-                    let text = code_el.text_content().unwrap_or_default();
+                        let btn_clone = btn.clone();
+                        wasm_bindgen_futures::spawn_local(async move {
+                            let Some(window) = web_sys::window() else { return };
+                            let clipboard = window.navigator().clipboard();
+                            let promise = clipboard.write_text(&text);
+                            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 
-                    // Copy to clipboard
-                    let btn_clone = btn.clone();
-                    wasm_bindgen_futures::spawn_local(async move {
-                        let Some(window) = web_sys::window() else { return };
-                        let clipboard = window.navigator().clipboard();
-                        let promise = clipboard.write_text(&text);
-                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                            btn_clone.set_inner_html(super::doc_renderer::CHECK_ICON_SVG);
+                            let _ = btn_clone.class_list().add_1("copied");
 
-                        // Visual feedback: swap icon to checkmark
-                        btn_clone.set_inner_html(super::doc_renderer::CHECK_ICON_SVG);
-                        let _ = btn_clone.class_list().add_1("copied");
-
-                        // Restore after 2 seconds
-                        let restore_btn = btn_clone.clone();
-                        let cb = Closure::once(move || {
-                            restore_btn.set_inner_html(super::doc_renderer::COPY_ICON_SVG);
-                            let _ = restore_btn.class_list().remove_1("copied");
+                            let restore_btn = btn_clone.clone();
+                            let cb = Closure::once(move || {
+                                restore_btn.set_inner_html(super::doc_renderer::COPY_ICON_SVG);
+                                let _ = restore_btn.class_list().remove_1("copied");
+                            });
+                            let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                cb.as_ref().unchecked_ref(),
+                                2000,
+                            );
+                            cb.forget();
                         });
-                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                            cb.as_ref().unchecked_ref(),
-                            2000,
-                        );
-                        cb.forget();
-                    });
+                        return;
+                    }
+
+                    // ── Attachment delete button ─────────────────────────────
+                    if let (Some(_del_btn), Some(ref block)) = (&delete_btn, &attachment_block) {
+                        if readonly { return; }
+
+                        ev.prevent_default();
+                        ev.stop_propagation();
+
+                        let is_image = block.class_list().contains("wysiwyg-image-block");
+                        let attachment_id = block.get_attribute("data-attachment-id")
+                            .filter(|s| !s.is_empty());
+                        let src_or_href = if is_image {
+                            block.get_attribute("data-src").unwrap_or_default()
+                        } else {
+                            block.get_attribute("data-href").unwrap_or_default()
+                        };
+
+                        // Fire the callback before removing from document.
+                        if let Some(ref cb) = on_delete_attachment_click {
+                            cb(DeleteAttachmentRequest {
+                                attachment_id: attachment_id.clone(),
+                                src_or_href: src_or_href.clone(),
+                            });
+                        }
+
+                        // Remove the block from the document.
+                        let pos_start = block.get_attribute("data-pos-start")
+                            .and_then(|s| s.parse::<usize>().ok());
+                        let pos_end = block.get_attribute("data-pos-end")
+                            .and_then(|s| s.parse::<usize>().ok());
+                        if let (Some(ps), Some(pe)) = (pos_start, pos_end) {
+                            let Ok(mut ds) = doc_state_click.lock() else { return };
+                            ds.delete_range(ps, pe);
+                            let md = ds.to_markdown();
+                            drop(ds);
+                            version.update(|v| *v += 1);
+                            if let Some(ref cb) = on_change_click {
+                                cb(md);
+                            }
+                        }
+                        return;
+                    }
+
+                    // ── Attachment click (not on delete button) ──────────────
+                    if let Some(ref block) = attachment_block {
+                        let is_image = block.class_list().contains("wysiwyg-image-block");
+                        let attachment_id = block.get_attribute("data-attachment-id")
+                            .filter(|s| !s.is_empty());
+                        let src_or_href = if is_image {
+                            block.get_attribute("data-src").unwrap_or_default()
+                        } else {
+                            block.get_attribute("data-href").unwrap_or_default()
+                        };
+                        let node_type = if is_image {
+                            AttachmentNodeType::Image
+                        } else {
+                            AttachmentNodeType::File
+                        };
+
+                        if let Some(ref cb) = on_click_attachment_click {
+                            ev.prevent_default();
+                            cb(ClickAttachmentRequest {
+                                attachment_id,
+                                src_or_href,
+                                node_type,
+                            });
+                        }
+                    }
                 }
                 on:scroll={
                     let slash_trigger_scroll = slash_trigger_for_scroll.clone();
@@ -1844,6 +1993,29 @@ fn compute_slash_menu_pos(el: &web_sys::Element) -> Option<(f64, f64, f64, bool)
         (el_rect.bottom() + gap, space_below - gap)
     };
     Some((top, max_h.max(100.0), el_rect.left(), flip))
+}
+
+/// Build a `DeleteAttachmentRequest` from an ImageBlock or FileBlock node's attributes.
+fn build_delete_request(node: &kode_doc::Node) -> DeleteAttachmentRequest {
+    let attachment_id = match get_attr(&node.attrs, "attachment_id") {
+        Some(AttrValue::String(s)) => Some(s.clone()),
+        _ => None,
+    };
+    let src_or_href = match node.node_type {
+        NodeType::ImageBlock => match get_attr(&node.attrs, "src") {
+            Some(AttrValue::String(s)) => s.clone(),
+            _ => String::new(),
+        },
+        NodeType::FileBlock => match get_attr(&node.attrs, "href") {
+            Some(AttrValue::String(s)) => s.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    };
+    DeleteAttachmentRequest {
+        attachment_id,
+        src_or_href,
+    }
 }
 
 fn render_toolbar_items(
