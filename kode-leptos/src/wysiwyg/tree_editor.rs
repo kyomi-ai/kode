@@ -2031,10 +2031,19 @@ pub fn TreeWysiwygEditor(
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
-        // Prevent focus loss when mousedown lands on the copy button.
+        // Prevent focus loss when mousedown lands on the copy button,
+        // and prevent cursor placement when Ctrl/Cmd+clicking a link.
         let mut walk = Some(target_el.clone());
         while let Some(ref current) = walk {
             if current.class_list().contains("wysiwyg-code-copy") {
+                ev.prevent_default();
+                return;
+            }
+            if !readonly
+                && (ev.ctrl_key() || ev.meta_key())
+                && current.tag_name().eq_ignore_ascii_case("A")
+                && current.class_list().contains("wysiwyg-link")
+            {
                 ev.prevent_default();
                 return;
             }
@@ -2143,6 +2152,7 @@ pub fn TreeWysiwygEditor(
                     let mut copy_btn: Option<web_sys::Element> = None;
                     let mut delete_btn: Option<web_sys::Element> = None;
                     let mut attachment_block: Option<web_sys::Element> = None;
+                    let mut link_el: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
                         if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
@@ -2157,6 +2167,12 @@ pub fn TreeWysiwygEditor(
                         {
                             attachment_block = Some(current.clone());
                             break;
+                        }
+                        if link_el.is_none()
+                            && current.tag_name().eq_ignore_ascii_case("A")
+                            && current.class_list().contains("wysiwyg-link")
+                        {
+                            link_el = Some(current.clone());
                         }
                         if current.class_list().contains("wysiwyg-scroll-container") {
                             break;
@@ -2262,6 +2278,25 @@ pub fn TreeWysiwygEditor(
                                 src_or_href,
                                 node_type,
                             });
+                        }
+                    }
+
+                    // ── Link click ──────────────────────────────────────────
+                    if let Some(ref a_el) = link_el {
+                        if let Some(href) = a_el.get_attribute("href") {
+                            let href_lower = href.trim().to_lowercase();
+                            let safe = href_lower.starts_with("http://")
+                                || href_lower.starts_with("https://")
+                                || href_lower.starts_with("mailto:");
+                            if safe {
+                                let should_open = readonly || ev.ctrl_key() || ev.meta_key();
+                                if should_open {
+                                    ev.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        let _ = window.open_with_url_and_target_and_features(&href, "_blank", "noopener,noreferrer");
+                                    }
+                                }
+                            }
                         }
                     }
                 }

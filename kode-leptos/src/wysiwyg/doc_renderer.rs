@@ -688,7 +688,7 @@ fn render_marked_text(html: &mut String, text: &str, marks: &[Mark]) {
                     Some(AttrValue::String(s)) => html_escape(&sanitize_url(s)),
                     _ => String::new(),
                 };
-                html.push_str(&format!("<a class=\"wysiwyg-link\" href=\"{}\">", href));
+                html.push_str(&format!("<a class=\"wysiwyg-link\" href=\"{}\" rel=\"noopener noreferrer\">", href));
             }
             MarkType::Strike => html.push_str("<del>"),
         }
