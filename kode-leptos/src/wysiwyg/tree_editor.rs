@@ -24,7 +24,7 @@ use web_sys::{CompositionEvent, HtmlElement, KeyboardEvent, MouseEvent};
 
 use crate::extension::{matches_key_descriptor, Extension, ExtensionKeyboardShortcut, ExtensionToolbarItem};
 use crate::theme::Theme;
-use crate::toolbar::{InjectCommand, SlashMenuItem, ToolbarItem, default_slash_menu_items, default_toolbar_items, dispatch_builtin_action};
+use crate::toolbar::{BuiltinButton, InjectCommand, SlashMenuItem, ToolbarItem, default_slash_menu_items, default_toolbar_items, dispatch_builtin_action};
 
 use super::attachment::{AttachmentNodeType, ClickAttachmentRequest, DeleteAttachmentRequest};
 use super::clipboard::{html_escape, extract_kode_markdown};
@@ -169,6 +169,10 @@ pub fn TreeWysiwygEditor(
     let slash_menu_state: RwSignal<Option<(f64, f64, f64, bool)>> = RwSignal::new(None);
     let slash_trigger_el: std::rc::Rc<std::cell::RefCell<Option<web_sys::Element>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
+
+    // ── Link popup state ────────────────────────────────────────────────
+    let link_popup_open = RwSignal::new(false);
+    let link_popup_url = RwSignal::new(String::new());
 
     let slash_menu_items: Arc<Vec<SlashMenuItem>> = Arc::new(if show_slash_menu {
         let mut items = default_slash_menu_items();
@@ -1817,6 +1821,7 @@ pub fn TreeWysiwygEditor(
 
         let toolbar_views = render_toolbar_items(
             items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
+            link_popup_open,
         );
 
         Some(view! {
@@ -1833,6 +1838,7 @@ pub fn TreeWysiwygEditor(
         let items = floating_toolbar_items.unwrap_or_else(default_toolbar_items);
         let toolbar_views = render_toolbar_items(
             items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
+            link_popup_open,
         );
         Some(view! {
             <div class="kode-floating-toolbar"
@@ -1919,6 +1925,100 @@ pub fn TreeWysiwygEditor(
                 }
                 on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
                 {menu_items_view}
+            </div>
+        }.into_any())
+    } else {
+        None
+    };
+
+    // ── Link popup view ─────────────────────────────────────────────────
+    let link_popup_view = if !readonly {
+        let link_input_ref = NodeRef::<leptos::html::Input>::new();
+
+        Effect::new(move || {
+            if link_popup_open.get() {
+                if let Some(input) = link_input_ref.get() {
+                    let _ = input.focus();
+                }
+            }
+        });
+
+        let doc_key = doc_state.clone();
+        let notify_key = notify.clone();
+        let doc_btn = doc_state.clone();
+        let notify_btn = notify.clone();
+
+        Some(view! {
+            <div class="kode-link-popup"
+                style=move || if link_popup_open.get() { "display:flex;" } else { "display:none;" }
+                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                <input
+                    node_ref=link_input_ref
+                    type="text"
+                    class="kode-link-popup-input"
+                    placeholder="https://example.com"
+                    prop:value=move || link_popup_url.get()
+                    on:input=move |ev| {
+                        link_popup_url.set(event_target_value(&ev));
+                    }
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            ev.prevent_default();
+                            let url = link_popup_url.get_untracked();
+                            if !url.trim().is_empty() && url.trim() != "https://" {
+                                let Ok(mut ds) = doc_key.lock() else { return };
+                                ds.insert_link(&url);
+                                let md = ds.to_markdown();
+                                drop(ds);
+                                (notify_key)(Some(md));
+                            }
+                            link_popup_open.set(false);
+                            link_popup_url.set(String::new());
+                            if let Some(el) = editor_ref.get() {
+                                let el: &web_sys::HtmlElement = el.as_ref();
+                                let _ = el.focus();
+                            }
+                        } else if ev.key() == "Escape" {
+                            ev.prevent_default();
+                            link_popup_open.set(false);
+                            link_popup_url.set(String::new());
+                            if let Some(el) = editor_ref.get() {
+                                let el: &web_sys::HtmlElement = el.as_ref();
+                                let _ = el.focus();
+                            }
+                        }
+                    }
+                />
+                <button class="kode-link-popup-apply"
+                    on:click=move |_: MouseEvent| {
+                        let url = link_popup_url.get_untracked();
+                        if !url.trim().is_empty() && url.trim() != "https://" {
+                            let Ok(mut ds) = doc_btn.lock() else { return };
+                            ds.insert_link(&url);
+                            let md = ds.to_markdown();
+                            drop(ds);
+                            (notify_btn)(Some(md));
+                        }
+                        link_popup_open.set(false);
+                        link_popup_url.set(String::new());
+                        if let Some(el) = editor_ref.get() {
+                            let el: &web_sys::HtmlElement = el.as_ref();
+                            let _ = el.focus();
+                        }
+                    }>
+                    "Apply"
+                </button>
+                <button class="kode-link-popup-cancel"
+                    on:click=move |_: MouseEvent| {
+                        link_popup_open.set(false);
+                        link_popup_url.set(String::new());
+                        if let Some(el) = editor_ref.get() {
+                            let el: &web_sys::HtmlElement = el.as_ref();
+                            let _ = el.focus();
+                        }
+                    }>
+                    "Cancel"
+                </button>
             </div>
         }.into_any())
     } else {
@@ -2024,6 +2124,7 @@ pub fn TreeWysiwygEditor(
             }>
 
             {toolbar_view}
+            {link_popup_view}
 
             <div
                 node_ref=editor_ref
@@ -2239,6 +2340,7 @@ fn render_toolbar_items(
     editor_ref: NodeRef<leptos::html::Div>,
     formatting_state: RwSignal<FormattingState>,
     extension_active_state: RwSignal<Vec<(String, bool)>>,
+    link_popup_open: RwSignal<bool>,
 ) -> Vec<AnyView> {
     let mut views: Vec<AnyView> = Vec::new();
     for item in items {
@@ -2256,6 +2358,7 @@ fn render_toolbar_items(
                 let doc_tb = doc_state.clone();
                 let notify_tb = notify.clone();
                 let editor_ref_tb = editor_ref;
+                let link_popup_tb = link_popup_open;
                 let title = btn.title();
                 let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
                 let class = Signal::derive(move || {
@@ -2263,6 +2366,10 @@ fn render_toolbar_items(
                     else { "kode-toolbar-button".to_string() }
                 });
                 let on_click = move |_: MouseEvent| {
+                    if matches!(btn, BuiltinButton::Link) {
+                        link_popup_tb.set(true);
+                        return;
+                    }
                     let Ok(mut ds) = doc_tb.lock() else { return };
                     dispatch_builtin_action(&mut ds, btn);
                     let md = ds.to_markdown();
@@ -2293,6 +2400,7 @@ fn render_toolbar_items(
                 let doc_tb = doc_state.clone();
                 let notify_tb = notify.clone();
                 let editor_ref_tb = editor_ref;
+                let link_popup_tb = link_popup_open;
                 let title = btn.title();
                 let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
                 let class = Signal::derive(move || {
@@ -2300,6 +2408,10 @@ fn render_toolbar_items(
                     else { "kode-toolbar-button".to_string() }
                 });
                 let on_click = move |_: MouseEvent| {
+                    if matches!(btn, BuiltinButton::Link) {
+                        link_popup_tb.set(true);
+                        return;
+                    }
                     let Ok(mut ds) = doc_tb.lock() else { return };
                     dispatch_builtin_action(&mut ds, btn);
                     let md = ds.to_markdown();
