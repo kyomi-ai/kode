@@ -822,6 +822,66 @@ body.kode-dragging * {
     margin-left: auto;
 }
 
+/* ── Link popup ───────────────────────────────────────────────────── */
+
+.kode-link-popup {
+    display: flex;
+    align-items: center;
+    gap: var(--kode-link-popup-gap, 6px);
+    padding: var(--kode-link-popup-padding, 4px 8px);
+    background: var(--kode-link-popup-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border-bottom: var(--kode-link-popup-border-width, 1px) solid var(--kode-link-popup-border-color, var(--kode-border));
+    font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    font-size: var(--kode-link-popup-font-size, 13px);
+    animation: kode-slash-menu-in 0.1s ease-out;
+}
+
+.kode-link-popup-input {
+    flex: 1;
+    min-width: var(--kode-link-popup-input-min-width, 200px);
+    padding: var(--kode-link-popup-input-padding, 4px 8px);
+    border: 1px solid var(--kode-link-popup-input-border-color, var(--kode-border));
+    border-radius: var(--kode-link-popup-input-border-radius, 4px);
+    background: var(--kode-link-popup-input-bg, var(--kode-bg-highlight));
+    color: var(--kode-link-popup-input-color, var(--kode-fg));
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+}
+
+.kode-link-popup-input:focus {
+    border-color: var(--kode-link-popup-input-focus-border, var(--kode-accent));
+}
+
+.kode-link-popup-apply,
+.kode-link-popup-cancel {
+    padding: var(--kode-link-popup-btn-padding, 4px 10px);
+    border: 1px solid transparent;
+    border-radius: var(--kode-link-popup-btn-border-radius, 4px);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 500;
+}
+
+.kode-link-popup-apply {
+    background: var(--kode-link-popup-apply-bg, var(--kode-accent));
+    color: var(--kode-link-popup-apply-color, var(--kode-bg));
+}
+
+.kode-link-popup-apply:hover {
+    opacity: 0.9;
+}
+
+.kode-link-popup-cancel {
+    background: var(--kode-link-popup-cancel-bg, transparent);
+    color: var(--kode-link-popup-cancel-color, var(--kode-fg-dim));
+}
+
+.kode-link-popup-cancel:hover {
+    background: var(--kode-link-popup-cancel-hover-bg, var(--kode-bg-hover));
+}
+
 /* .kode-text-segment — wrapper div for text blocks in segment-based rendering.
    No visual styles needed; used as an innerHTML update target by patch_segments(). */
 

@@ -271,7 +271,7 @@ fn dispatch_action(ed: &mut MarkdownEditor, idx: usize) {
         7 => MarkdownCommands::toggle_bullet_list(ed.editor_mut()),
         8 => MarkdownCommands::toggle_ordered_list(ed.editor_mut()),
         9 => MarkdownCommands::toggle_blockquote(ed.editor_mut()),
-        10 => MarkdownCommands::insert_link(ed.editor_mut(), "https://"),
+        10 => return,
         11 => MarkdownCommands::insert_code_block(ed.editor_mut(), ""),
         12 => MarkdownCommands::insert_horizontal_rule(ed.editor_mut()),
         _ => return,
@@ -372,6 +372,11 @@ pub fn Toolbar(
     #[prop(into, default = Signal::stored(Vec::<(String, bool)>::new()))]
     extension_active_state: Signal<Vec<(String, bool)>>,
 ) -> impl IntoView {
+    // ── Link popup state ────────────────────────────────────────────
+    let link_popup_open = RwSignal::new(false);
+    let link_popup_url = RwSignal::new(String::new());
+    let link_input_ref = NodeRef::<leptos::html::Input>::new();
+
     // We build the children as a collected Vec of fragments.
     // Each item is either a separator or a button.
     let items: Vec<AnyView> = {
@@ -388,6 +393,22 @@ pub fn Toolbar(
                 }
             }
             prev_group = Some(def.group);
+
+            // Link button (idx=10) opens the popup instead of inserting directly
+            if idx == 10 {
+                let link_popup_tb = link_popup_open;
+                out.push(view! {
+                    <button
+                        title={def.title}
+                        class="kode-toolbar-button"
+                        on:click=move |_: web_sys::MouseEvent| { link_popup_tb.set(true); }
+                        on:mousedown=move |ev: web_sys::MouseEvent| { ev.prevent_default(); }
+                    >
+                        {def.label}
+                    </button>
+                }.into_any());
+                continue;
+            }
 
             let ed = Arc::clone(&editor);
             let cb = Arc::clone(&on_action);
@@ -463,9 +484,86 @@ pub fn Toolbar(
         out
     };
 
+    // ── Link popup ──────────────────────────────────────────────────
+    let ed_key = Arc::clone(&editor);
+    let cb_key = Arc::clone(&on_action);
+    let ed_apply = Arc::clone(&editor);
+    let cb_apply = Arc::clone(&on_action);
+
+    Effect::new(move || {
+        if link_popup_open.get() {
+            if let Some(input) = link_input_ref.get() {
+                let _ = input.focus();
+            }
+        }
+    });
+
     view! {
         <div class="kode-toolbar">
             {items}
+        </div>
+        <div class="kode-link-popup"
+            style=move || if link_popup_open.get() { "display:flex;" } else { "display:none;" }
+            on:mousedown=|ev: web_sys::MouseEvent| { ev.prevent_default(); }>
+            <input
+                node_ref=link_input_ref
+                type="text"
+                class="kode-link-popup-input"
+                placeholder="https://example.com"
+                prop:value=move || link_popup_url.get()
+                on:input=move |ev| {
+                    link_popup_url.set(event_target_value(&ev));
+                }
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    if ev.key() == "Enter" {
+                        ev.prevent_default();
+                        let url = link_popup_url.get_untracked();
+                        if !url.trim().is_empty() && url.trim() != "https://" {
+                            let Ok(mut ed) = ed_key.lock() else {
+                                link_popup_open.set(false);
+                                link_popup_url.set(String::new());
+                                return;
+                            };
+                            MarkdownCommands::insert_link(ed.editor_mut(), &url);
+                            ed.sync_tree();
+                            drop(ed);
+                            cb_key();
+                        }
+                        link_popup_open.set(false);
+                        link_popup_url.set(String::new());
+                    } else if ev.key() == "Escape" {
+                        ev.prevent_default();
+                        link_popup_open.set(false);
+                        link_popup_url.set(String::new());
+                    }
+                }
+            />
+            <button class="kode-link-popup-apply"
+                on:click=move |_: web_sys::MouseEvent| {
+                    let url = link_popup_url.get_untracked();
+                    if !url.trim().is_empty() && url.trim() != "https://" {
+                        let Ok(mut ed) = ed_apply.lock() else {
+                            link_popup_open.set(false);
+                            link_popup_url.set(String::new());
+                            return;
+                        };
+                        MarkdownCommands::insert_link(ed.editor_mut(), &url);
+                        ed.sync_tree();
+                        drop(ed);
+                        cb_apply();
+                    }
+                    link_popup_open.set(false);
+                    link_popup_url.set(String::new());
+                }>
+                "Apply"
+            </button>
+            <button class="kode-link-popup-cancel"
+                on:click=move |_: web_sys::MouseEvent| {
+                    link_popup_open.set(false);
+                    link_popup_url.set(String::new());
+                }>
+                "Cancel"
+            </button>
         </div>
     }
 }
