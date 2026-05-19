@@ -395,7 +395,7 @@ pub fn TreeWysiwygEditor(
         let kd_handled_raf = keydown_handled_effect.clone();
 
         let cb = Closure::once(move || {
-            let Some(container) = editor_raf.get() else { return };
+            let Some(container) = editor_raf.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
             let Ok(ds) = doc_raf.lock() else { return };
@@ -435,6 +435,7 @@ pub fn TreeWysiwygEditor(
         let doc_input = doc_state.clone();
         let notify_input = notify.clone();
         let editor_input = editor_ref;
+        let kd_handled_input = keydown_handled.clone();
 
         let beforeinput_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
             if readonly { return; }
@@ -451,7 +452,7 @@ pub fn TreeWysiwygEditor(
             input_ev.prevent_default();
 
             let container: Option<web_sys::Element> = editor_input
-                .get()
+                .get_untracked()
                 .map(|el| el.unchecked_ref::<web_sys::Element>().clone());
 
             let Ok(mut ds) = doc_input.lock() else { return };
@@ -461,8 +462,32 @@ pub fn TreeWysiwygEditor(
                 sync_selection_to_doc(&mut ds, c);
             }
 
+            // Use getTargetRanges() for OS-level text replacements
+            // (e.g. spellcheck corrections). Map the target range to doc
+            // positions so the replacement overwrites the correct text.
+            // Skip ranges that cross block boundaries — they include
+            // structural positions that the browser doesn't understand.
+            if let Some(ref c) = container {
+                let target_ranges = input_ev.get_target_ranges();
+                if target_ranges.length() > 0 {
+                    if let Ok(range) = target_ranges.get(0).dyn_into::<web_sys::StaticRange>() {
+                        let sn = range.start_container();
+                        let en = range.end_container();
+                        let so = range.start_offset();
+                        let eo = range.end_offset();
+                        let start_pos = node_offset_to_doc_pos(c, &sn, so);
+                        let end_pos = node_offset_to_doc_pos(c, &en, eo);
+                        if let (Some(s), Some(e)) = (start_pos, end_pos) {
+                            if s != e && !ds.text_between(s, e).contains('\n') {
+                                ds.set_selection(Selection::range(s, e));
+                            }
+                        }
+                    }
+                }
+            }
+
             match input_type.as_str() {
-                "insertText" => {
+                "insertText" | "insertReplacementText" => {
                     if let Some(data) = input_ev.data() {
                         if !data.is_empty() {
                             ds.insert_text(&data);
@@ -519,6 +544,7 @@ pub fn TreeWysiwygEditor(
 
             let md = ds.to_markdown();
             drop(ds);
+            kd_handled_input.set(true);
             (notify_input)(Some(md));
         });
 
@@ -669,10 +695,13 @@ pub fn TreeWysiwygEditor(
         let closures = std::cell::RefCell::new(Some((beforeinput_cb, copy_cb, cut_cb, paste_cb)));
 
         Effect::new(move |_| {
-            let Some(el) = editor_input.get() else { return };
+            let Some(el) = editor_input.get_untracked() else { return };
             let Some((bi_cb, cp_cb, ct_cb, pa_cb)) = closures.borrow_mut().take() else {
                 return; // Already attached.
             };
+            let html_el: &web_sys::Element = el.as_ref();
+            let _ = html_el.set_attribute("autocorrect", "off");
+            let _ = html_el.set_attribute("autocapitalize", "off");
             let target: &web_sys::EventTarget = el.as_ref();
             let _ = target.add_event_listener_with_callback(
                 "beforeinput",
@@ -719,7 +748,7 @@ pub fn TreeWysiwygEditor(
         let editor_dragover = editor_ref;
         let dragover_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
             ev.prevent_default(); // Required to allow drop
-            if let Some(el) = editor_dragover.get() {
+            if let Some(el) = editor_dragover.get_untracked() {
                 let _ = el.class_list().add_1("wysiwyg-drag-over");
             }
         });
@@ -727,7 +756,7 @@ pub fn TreeWysiwygEditor(
         let editor_dragleave = editor_ref;
         let dragleave_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
             ev.prevent_default();
-            if let Some(el) = editor_dragleave.get() {
+            if let Some(el) = editor_dragleave.get_untracked() {
                 let _ = el.class_list().remove_1("wysiwyg-drag-over");
             }
         });
@@ -741,7 +770,7 @@ pub fn TreeWysiwygEditor(
             if readonly { return; }
 
             // Remove drag-over class.
-            if let Some(el) = editor_drop.get() {
+            if let Some(el) = editor_drop.get_untracked() {
                 let _ = el.class_list().remove_1("wysiwyg-drag-over");
             }
 
@@ -798,7 +827,7 @@ pub fn TreeWysiwygEditor(
         let editor_upload_attach = editor_ref;
 
         Effect::new(move |_| {
-            let Some(el) = editor_upload_attach.get() else { return };
+            let Some(el) = editor_upload_attach.get_untracked() else { return };
             let Some((dov_cb, dlv_cb, drp_cb)) = upload_closures.borrow_mut().take() else {
                 return; // Already attached.
             };
@@ -878,7 +907,7 @@ pub fn TreeWysiwygEditor(
             let ev: web_sys::PointerEvent = ev.unchecked_into();
             let client_y = ev.client_y() as f64;
 
-            let Some(container) = editor_move.get() else { return };
+            let Some(container) = editor_move.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
             // Find all top-level blocks and determine which gap the pointer is in.
@@ -999,7 +1028,7 @@ pub fn TreeWysiwygEditor(
                 let _ = body.class_list().remove_1("kode-dragging");
             }
 
-            let Some(container) = editor_up.get() else { return };
+            let Some(container) = editor_up.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
             // Remove drop indicator.
@@ -1055,7 +1084,7 @@ pub fn TreeWysiwygEditor(
             let old_rects_js = send_wrapper::SendWrapper::new(old_rects);
             let editor_flip = editor_up;
             let flip_cb = Closure::once(move || {
-                let Some(container) = editor_flip.get() else { return };
+                let Some(container) = editor_flip.get_untracked() else { return };
                 let container_el: &web_sys::Element = container.as_ref();
 
                 let Ok(new_blocks) = container_el.query_selector_all("div.kode-extension-block[data-kode-extension]") else { return };
@@ -1129,7 +1158,7 @@ pub fn TreeWysiwygEditor(
                 let _ = body.class_list().remove_1("kode-dragging");
             }
 
-            let Some(container) = editor_cancel.get() else { return };
+            let Some(container) = editor_cancel.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
             if let Ok(Some(indicator)) = container_el.query_selector(".kode-drop-indicator") {
@@ -1151,7 +1180,7 @@ pub fn TreeWysiwygEditor(
         let editor_attach = editor_ref;
 
         Effect::new(move |_| {
-            let Some(el) = editor_attach.get() else { return };
+            let Some(el) = editor_attach.get_untracked() else { return };
             let Some((pd, pm, pu, pc)) = drag_closures.borrow_mut().take() else {
                 return; // Already attached.
             };
@@ -1278,7 +1307,7 @@ pub fn TreeWysiwygEditor(
 
         // ── Slash menu trigger: "/" on empty block ──────────────────────
         if show_slash_menu && key == "/" && !ctrl && !shift && slash_item_count > 0
-            && editor_ref.get().is_some() {
+            && editor_ref.get_untracked().is_some() {
                 let Ok(ds) = doc_key.lock() else { return };
                 let pos = ds.selection().head;
                 let resolved = ds.doc().resolve(pos);
@@ -1306,7 +1335,7 @@ pub fn TreeWysiwygEditor(
         match key.as_str() {
             "z" if ctrl && shift => {
                 // Sync selection from browser before redo
-                if let Some(container) = editor_ref.get() {
+                if let Some(container) = editor_ref.get_untracked() {
                     let container_el: &web_sys::Element = container.as_ref();
                     let Ok(mut ds) = doc_key.lock() else { return };
                     sync_selection_to_doc(&mut ds, container_el);
@@ -1319,7 +1348,7 @@ pub fn TreeWysiwygEditor(
                 return;
             }
             "z" if ctrl => {
-                if let Some(container) = editor_ref.get() {
+                if let Some(container) = editor_ref.get_untracked() {
                     let container_el: &web_sys::Element = container.as_ref();
                     let Ok(mut ds) = doc_key.lock() else { return };
                     sync_selection_to_doc(&mut ds, container_el);
@@ -1619,7 +1648,7 @@ pub fn TreeWysiwygEditor(
             if !data.is_empty() {
                 let Ok(mut ds) = doc_comp_end.lock() else { return };
                 // Sync selection from browser to know where to insert the composed text.
-                if let Some(container) = editor_ref.get() {
+                if let Some(container) = editor_ref.get_untracked() {
                     let container_el: &web_sys::Element = container.as_ref();
                     sync_selection_to_doc(&mut ds, container_el);
                 }
@@ -1647,7 +1676,7 @@ pub fn TreeWysiwygEditor(
             if kd_handled_selchange.get() {
                 return;
             }
-            let Some(container) = editor_selchange.get() else { return };
+            let Some(container) = editor_selchange.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
             // Only sync if the selection is inside our editor.
@@ -1741,7 +1770,7 @@ pub fn TreeWysiwygEditor(
         let editor_mouseup = editor_ref;
 
         let mousedown_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
-            let Some(container) = editor_mousedown.get() else { return };
+            let Some(container) = editor_mousedown.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
             let Some(target) = ev.target() else { return };
             let Some(target_node) = target.dyn_ref::<web_sys::Node>() else { return };
@@ -1758,7 +1787,7 @@ pub fn TreeWysiwygEditor(
             }
             mouse_selecting_up.set(false);
 
-            let Some(container) = editor_mouseup.get() else { return };
+            let Some(container) = editor_mouseup.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
             let Some(window) = web_sys::window() else { return };
             let Some(sel) = window.get_selection().ok().flatten() else { return };
@@ -1974,7 +2003,7 @@ pub fn TreeWysiwygEditor(
                             }
                             link_popup_open.set(false);
                             link_popup_url.set(String::new());
-                            if let Some(el) = editor_ref.get() {
+                            if let Some(el) = editor_ref.get_untracked() {
                                 let el: &web_sys::HtmlElement = el.as_ref();
                                 let _ = el.focus();
                             }
@@ -1982,7 +2011,7 @@ pub fn TreeWysiwygEditor(
                             ev.prevent_default();
                             link_popup_open.set(false);
                             link_popup_url.set(String::new());
-                            if let Some(el) = editor_ref.get() {
+                            if let Some(el) = editor_ref.get_untracked() {
                                 let el: &web_sys::HtmlElement = el.as_ref();
                                 let _ = el.focus();
                             }
@@ -2001,7 +2030,7 @@ pub fn TreeWysiwygEditor(
                         }
                         link_popup_open.set(false);
                         link_popup_url.set(String::new());
-                        if let Some(el) = editor_ref.get() {
+                        if let Some(el) = editor_ref.get_untracked() {
                             let el: &web_sys::HtmlElement = el.as_ref();
                             let _ = el.focus();
                         }
@@ -2012,7 +2041,7 @@ pub fn TreeWysiwygEditor(
                     on:click=move |_: MouseEvent| {
                         link_popup_open.set(false);
                         link_popup_url.set(String::new());
-                        if let Some(el) = editor_ref.get() {
+                        if let Some(el) = editor_ref.get_untracked() {
                             let el: &web_sys::HtmlElement = el.as_ref();
                             let _ = el.focus();
                         }
@@ -2094,7 +2123,7 @@ pub fn TreeWysiwygEditor(
 
         if let Some((side, bs, be)) = ds.gap_cursor_info() {
             drop(ds);
-            if let Some(container) = editor_ref.get() {
+            if let Some(container) = editor_ref.get_untracked() {
                 let container_el: &web_sys::Element = container.as_ref();
                 show_gap_cursor(container_el, side, bs, be);
                 let _ = container.dyn_ref::<HtmlElement>().map(|el| {
@@ -2104,7 +2133,7 @@ pub fn TreeWysiwygEditor(
             }
         } else {
             drop(ds);
-            if let Some(container) = editor_ref.get() {
+            if let Some(container) = editor_ref.get_untracked() {
                 let _ = container.dyn_ref::<HtmlElement>().map(|el| el.focus());
             }
         }
@@ -2410,7 +2439,7 @@ fn render_toolbar_items(
                     let md = ds.to_markdown();
                     drop(ds);
                     (notify_tb)(Some(md));
-                    if let Some(el) = editor_ref_tb.get() {
+                    if let Some(el) = editor_ref_tb.get_untracked() {
                         let el: &HtmlElement = el.as_ref();
                         let _ = el.focus();
                     }
@@ -2452,7 +2481,7 @@ fn render_toolbar_items(
                     let md = ds.to_markdown();
                     drop(ds);
                     (notify_tb)(Some(md));
-                    if let Some(el) = editor_ref_tb.get() {
+                    if let Some(el) = editor_ref_tb.get_untracked() {
                         let el: &HtmlElement = el.as_ref();
                         let _ = el.focus();
                     }
@@ -2501,7 +2530,7 @@ fn render_toolbar_items(
                         drop(ds);
                         (notify_ext_tb)(Some(md_out));
                     } else { drop(ds); }
-                    if let Some(el) = editor_ref_tb.get() {
+                    if let Some(el) = editor_ref_tb.get_untracked() {
                         let el: &HtmlElement = el.as_ref();
                         let _ = el.focus();
                     }
