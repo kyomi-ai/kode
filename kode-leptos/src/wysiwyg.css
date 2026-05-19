@@ -824,64 +824,86 @@ body.kode-dragging * {
     margin-left: auto;
 }
 
-/* ── Link popup ───────────────────────────────────────────────────── */
+/* ── Link Popover (floating, near selection) ─────────────────────── */
 
-.kode-link-popup {
+.kode-link-popover {
+    position: absolute;
+    z-index: 25;
     display: flex;
     align-items: center;
-    gap: var(--kode-link-popup-gap, 6px);
-    padding: var(--kode-link-popup-padding, 4px 8px);
-    background: var(--kode-link-popup-bg, var(--kode-toolbar-bg, var(--kode-bg)));
-    border-bottom: var(--kode-link-popup-border-width, 1px) solid var(--kode-link-popup-border-color, var(--kode-border));
+    gap: var(--kode-link-popover-gap, 6px);
+    padding: var(--kode-link-popover-padding, 4px 8px);
+    background: var(--kode-link-popover-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border: var(--kode-link-popover-border-width, 1px) solid var(--kode-link-popover-border-color, var(--kode-border));
+    border-radius: var(--kode-link-popover-border-radius, 8px);
+    box-shadow: var(--kode-link-popover-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
     font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-    font-size: var(--kode-link-popup-font-size, 13px);
-    animation: kode-slash-menu-in 0.1s ease-out;
+    font-size: var(--kode-link-popover-font-size, 13px);
+    pointer-events: auto;
+    animation: kode-link-popover-in 0.1s ease-out;
 }
 
-.kode-link-popup-input {
+.kode-link-popover.flipped {
+    animation-name: kode-link-popover-in-flipped;
+}
+
+@keyframes kode-link-popover-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kode-link-popover-in-flipped {
+    from { opacity: 0; transform: translateY(-100%) translateY(-4px); }
+    to   { opacity: 1; transform: translateY(-100%); }
+}
+
+.kode-link-popover-input {
     flex: 1;
-    min-width: var(--kode-link-popup-input-min-width, 200px);
-    padding: var(--kode-link-popup-input-padding, 4px 8px);
-    border: 1px solid var(--kode-link-popup-input-border-color, var(--kode-border));
-    border-radius: var(--kode-link-popup-input-border-radius, 4px);
-    background: var(--kode-link-popup-input-bg, var(--kode-bg-highlight));
-    color: var(--kode-link-popup-input-color, var(--kode-fg));
+    min-width: var(--kode-link-popover-input-min-width, 220px);
+    padding: var(--kode-link-popover-input-padding, 4px 8px);
+    border: 1px solid var(--kode-link-popover-input-border-color, var(--kode-border));
+    border-radius: var(--kode-link-popover-input-border-radius, 4px);
+    background: var(--kode-link-popover-input-bg, var(--kode-bg-highlight));
+    color: var(--kode-link-popover-input-color, var(--kode-fg));
     font-family: inherit;
     font-size: inherit;
     outline: none;
 }
 
-.kode-link-popup-input:focus {
-    border-color: var(--kode-link-popup-input-focus-border, var(--kode-accent));
+.kode-link-popover-input:focus {
+    border-color: var(--kode-link-popover-input-focus-border, var(--kode-accent));
 }
 
-.kode-link-popup-apply,
-.kode-link-popup-cancel {
-    padding: var(--kode-link-popup-btn-padding, 4px 10px);
+.kode-link-popover-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border: 1px solid transparent;
-    border-radius: var(--kode-link-popup-btn-border-radius, 4px);
+    border-radius: var(--kode-link-popover-btn-border-radius, 4px);
     cursor: pointer;
-    font-family: inherit;
-    font-size: inherit;
-    font-weight: 500;
+    background: transparent;
+    color: var(--kode-link-popover-btn-color, var(--kode-fg-dim));
 }
 
-.kode-link-popup-apply {
-    background: var(--kode-link-popup-apply-bg, var(--kode-accent));
-    color: var(--kode-link-popup-apply-color, var(--kode-bg));
+.kode-link-popover-btn:hover {
+    background: var(--kode-link-popover-btn-hover-bg, var(--kode-bg-hover));
 }
 
-.kode-link-popup-apply:hover {
-    opacity: 0.9;
+.kode-link-popover-btn.apply {
+    color: var(--kode-link-popover-apply-color, var(--kode-accent));
 }
 
-.kode-link-popup-cancel {
-    background: var(--kode-link-popup-cancel-bg, transparent);
-    color: var(--kode-link-popup-cancel-color, var(--kode-fg-dim));
+.kode-link-popover-btn.apply:hover {
+    background: var(--kode-link-popover-apply-hover-bg, var(--kode-accent));
+    color: var(--kode-link-popover-apply-hover-color, var(--kode-bg));
 }
 
-.kode-link-popup-cancel:hover {
-    background: var(--kode-link-popup-cancel-hover-bg, var(--kode-bg-hover));
+.kode-link-popover-btn svg {
+    width: 16px;
+    height: 16px;
 }
 
 /* .kode-text-segment — wrapper div for text blocks in segment-based rendering.

@@ -1,5 +1,6 @@
 pub mod attachment;
 pub mod doc_renderer;
+pub mod popover_position;
 pub mod tree_editor;
 
 mod clipboard;

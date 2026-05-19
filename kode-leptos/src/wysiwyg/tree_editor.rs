@@ -30,6 +30,7 @@ use super::attachment::{AttachmentNodeType, ClickAttachmentRequest, DeleteAttach
 use super::clipboard::{html_escape, extract_kode_markdown};
 use super::doc_renderer::{doc_to_segments, RenderSegment};
 use super::dom_helpers::apply_md_command;
+use super::popover_position::compute_position_relative;
 
 /// Tree-based WYSIWYG editor component using `contenteditable`.
 ///
@@ -174,9 +175,13 @@ pub fn TreeWysiwygEditor(
     let slash_trigger_el: std::rc::Rc<std::cell::RefCell<Option<web_sys::Element>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
 
-    // ── Link popup state ────────────────────────────────────────────────
+    // ── Link popover state ──────────────────────────────────────────────
+    // `link_popup_open` is the trigger signal set by the toolbar Link button.
+    // The popover itself is controlled by `link_popover_pos`.
     let link_popup_open = RwSignal::new(false);
-    let link_popup_url = RwSignal::new(String::new());
+    let link_popover_pos: RwSignal<Option<(f64, f64, bool)>> = RwSignal::new(None);
+    let link_popover_url = RwSignal::new(String::new());
+    let link_popover_edit_range: RwSignal<Option<(usize, usize)>> = RwSignal::new(None);
 
     let slash_menu_items: Arc<Vec<SlashMenuItem>> = Arc::new(if show_slash_menu {
         let mut items = default_slash_menu_items();
@@ -2145,57 +2150,130 @@ pub fn TreeWysiwygEditor(
         None
     };
 
-    // ── Link popup view ─────────────────────────────────────────────────
-    let link_popup_view = if !readonly {
+    // ── Link popover view ──────────────────────────────────────────────
+    let link_popover_view = if !readonly {
         let link_input_ref = NodeRef::<leptos::html::Input>::new();
 
+        // When toolbar Link button fires, compute position from selection.
+        {
+            let doc_state_trigger = doc_state.clone();
+            Effect::new(move || {
+                if !link_popup_open.get() { return; }
+                link_popup_open.set(false);
+
+                let Some(container) = editor_ref.get_untracked() else { return };
+                let container_el: &web_sys::Element = container.as_ref();
+                let Some(parent) = container_el.parent_element() else { return };
+                let parent_rect = parent.get_bounding_client_rect();
+
+                // Check if cursor is already on a link (edit mode).
+                if let Ok(ds) = doc_state_trigger.lock() {
+                    if let Some((href, from, to)) = ds.link_at_cursor() {
+                        drop(ds);
+                        let Some(window) = web_sys::window() else { return };
+                        let Some(sel) = window.get_selection().ok().flatten() else { return };
+                        if sel.range_count() > 0 {
+                            if let Ok(range) = sel.get_range_at(0) {
+                                let rect = range.get_bounding_client_rect();
+                                if let Some(pos) = compute_position_relative(&rect, &parent_rect, 60.0) {
+                                    link_popover_url.set(href);
+                                    link_popover_edit_range.set(Some((from, to)));
+                                    floating_pos.set(None);
+                                    link_popover_pos.set(Some((pos.top, pos.left, pos.flipped)));
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    drop(ds);
+                }
+
+                // Insert mode — position from selection range.
+                let Some(window) = web_sys::window() else { return };
+                let Some(sel) = window.get_selection().ok().flatten() else { return };
+                if sel.range_count() > 0 {
+                    if let Ok(range) = sel.get_range_at(0) {
+                        let rect = range.get_bounding_client_rect();
+                        if let Some(pos) = compute_position_relative(&rect, &parent_rect, 60.0) {
+                            link_popover_url.set(String::new());
+                            link_popover_edit_range.set(None);
+                            floating_pos.set(None);
+                            link_popover_pos.set(Some((pos.top, pos.left, pos.flipped)));
+                        }
+                    }
+                }
+            });
+        }
+
+        // Auto-focus input when popover opens.
         Effect::new(move || {
-            if link_popup_open.get() {
+            if link_popover_pos.get().is_some() {
                 if let Some(input) = link_input_ref.get() {
                     let _ = input.focus();
                 }
             }
         });
 
+        // SVG icons for buttons.
+        const CHECK_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>"#;
+        const CLOSE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>"#;
+        const UNLINK_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/><line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/><line x1="16" y1="19" x2="16" y2="22"/><line x1="19" y1="16" x2="22" y2="16"/></svg>"#;
+
         let doc_key = doc_state.clone();
         let notify_key = notify.clone();
-        let doc_btn = doc_state.clone();
-        let notify_btn = notify.clone();
+        let doc_apply_btn = doc_state.clone();
+        let notify_apply_btn = notify.clone();
+        let doc_unlink = doc_state.clone();
+        let notify_unlink = notify.clone();
 
         Some(view! {
-            <div class="kode-link-popup"
-                style=move || if link_popup_open.get() { "display:flex;" } else { "display:none;" }
+            <div class="kode-link-popover"
+                style=move || {
+                    match link_popover_pos.get() {
+                        Some((top, left, flipped)) => {
+                            let transform = if flipped { "transform:translateY(-100%);" } else { "" };
+                            format!("display:flex;top:{top}px;left:{left}px;{transform}")
+                        }
+                        None => "display:none;".to_string(),
+                    }
+                }
                 on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
                 <input
                     node_ref=link_input_ref
                     type="text"
-                    class="kode-link-popup-input"
+                    class="kode-link-popover-input"
                     placeholder="https://example.com"
-                    prop:value=move || link_popup_url.get()
+                    prop:value=move || link_popover_url.get()
                     on:input=move |ev| {
-                        link_popup_url.set(event_target_value(&ev));
+                        link_popover_url.set(event_target_value(&ev));
                     }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         if ev.key() == "Enter" {
                             ev.prevent_default();
-                            let url = link_popup_url.get_untracked();
+                            let url = link_popover_url.get_untracked();
                             if !url.trim().is_empty() && url.trim() != "https://" {
                                 let Ok(mut ds) = doc_key.lock() else { return };
-                                ds.insert_link(&url);
+                                if let Some((from, to)) = link_popover_edit_range.get_untracked() {
+                                    ds.update_link(from, to, &url);
+                                } else {
+                                    ds.insert_link(&url);
+                                }
                                 let md = ds.to_markdown();
                                 drop(ds);
                                 (notify_key)(Some(md));
                             }
-                            link_popup_open.set(false);
-                            link_popup_url.set(String::new());
+                            link_popover_pos.set(None);
+                            link_popover_url.set(String::new());
+                            link_popover_edit_range.set(None);
                             if let Some(el) = editor_ref.get_untracked() {
                                 let el: &web_sys::HtmlElement = el.as_ref();
                                 let _ = el.focus();
                             }
                         } else if ev.key() == "Escape" {
                             ev.prevent_default();
-                            link_popup_open.set(false);
-                            link_popup_url.set(String::new());
+                            link_popover_pos.set(None);
+                            link_popover_url.set(String::new());
+                            link_popover_edit_range.set(None);
                             if let Some(el) = editor_ref.get_untracked() {
                                 let el: &web_sys::HtmlElement = el.as_ref();
                                 let _ = el.focus();
@@ -2203,36 +2281,71 @@ pub fn TreeWysiwygEditor(
                         }
                     }
                 />
-                <button class="kode-link-popup-apply"
+                <button class="kode-link-popover-btn apply"
+                    title="Apply"
+                    inner_html=CHECK_SVG
                     on:click=move |_: MouseEvent| {
-                        let url = link_popup_url.get_untracked();
+                        let url = link_popover_url.get_untracked();
                         if !url.trim().is_empty() && url.trim() != "https://" {
-                            let Ok(mut ds) = doc_btn.lock() else { return };
-                            ds.insert_link(&url);
+                            let Ok(mut ds) = doc_apply_btn.lock() else { return };
+                            if let Some((from, to)) = link_popover_edit_range.get_untracked() {
+                                ds.update_link(from, to, &url);
+                            } else {
+                                ds.insert_link(&url);
+                            }
                             let md = ds.to_markdown();
                             drop(ds);
-                            (notify_btn)(Some(md));
+                            (notify_apply_btn)(Some(md));
                         }
-                        link_popup_open.set(false);
-                        link_popup_url.set(String::new());
+                        link_popover_pos.set(None);
+                        link_popover_url.set(String::new());
+                        link_popover_edit_range.set(None);
                         if let Some(el) = editor_ref.get_untracked() {
                             let el: &web_sys::HtmlElement = el.as_ref();
                             let _ = el.focus();
                         }
-                    }>
-                    "Apply"
-                </button>
-                <button class="kode-link-popup-cancel"
+                    } />
+                {move || {
+                    if link_popover_edit_range.get().is_some() {
+                        let doc_u = doc_unlink.clone();
+                        let notify_u = notify_unlink.clone();
+                        Some(view! {
+                            <button class="kode-link-popover-btn unlink"
+                                title="Remove link"
+                                inner_html=UNLINK_SVG
+                                on:click=move |_: MouseEvent| {
+                                    if let Some((from, to)) = link_popover_edit_range.get_untracked() {
+                                        let Ok(mut ds) = doc_u.lock() else { return };
+                                        ds.remove_link(from, to);
+                                        let md = ds.to_markdown();
+                                        drop(ds);
+                                        (notify_u)(Some(md));
+                                    }
+                                    link_popover_pos.set(None);
+                                    link_popover_url.set(String::new());
+                                    link_popover_edit_range.set(None);
+                                    if let Some(el) = editor_ref.get_untracked() {
+                                        let el: &web_sys::HtmlElement = el.as_ref();
+                                        let _ = el.focus();
+                                    }
+                                } />
+                        })
+                    } else {
+                        None
+                    }
+                }}
+                <button class="kode-link-popover-btn cancel"
+                    title="Cancel"
+                    inner_html=CLOSE_SVG
                     on:click=move |_: MouseEvent| {
-                        link_popup_open.set(false);
-                        link_popup_url.set(String::new());
+                        link_popover_pos.set(None);
+                        link_popover_url.set(String::new());
+                        link_popover_edit_range.set(None);
                         if let Some(el) = editor_ref.get_untracked() {
                             let el: &web_sys::HtmlElement = el.as_ref();
                             let _ = el.focus();
                         }
-                    }>
-                    "Cancel"
-                </button>
+                    } />
             </div>
         }.into_any())
     } else {
@@ -2347,7 +2460,6 @@ pub fn TreeWysiwygEditor(
             }>
 
             {toolbar_view}
-            {link_popup_view}
 
             <div
                 node_ref=editor_ref
@@ -2509,6 +2621,25 @@ pub fn TreeWysiwygEditor(
                                     if let Some(window) = web_sys::window() {
                                         let _ = window.open_with_url_and_target_and_features(&href, "_blank", "noopener,noreferrer");
                                     }
+                                } else if !readonly {
+                                    // Plain click on link — open popover in edit mode.
+                                    ev.prevent_default();
+                                    if let Ok(ds) = doc_state_click.lock() {
+                                        if let Some((link_href, from, to)) = ds.link_at_cursor() {
+                                            drop(ds);
+                                            let link_rect = a_el.get_bounding_client_rect();
+                                            let Some(container) = editor_ref.get_untracked() else { return };
+                                            let container_el: &web_sys::Element = container.as_ref();
+                                            let Some(parent) = container_el.parent_element() else { return };
+                                            let parent_rect = parent.get_bounding_client_rect();
+                                            if let Some(pos) = compute_position_relative(&link_rect, &parent_rect, 60.0) {
+                                                link_popover_url.set(link_href);
+                                                link_popover_edit_range.set(Some((from, to)));
+                                                floating_pos.set(None);
+                                                link_popover_pos.set(Some((pos.top, pos.left, pos.flipped)));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2517,6 +2648,12 @@ pub fn TreeWysiwygEditor(
                 on:scroll={
                     let slash_trigger_scroll = slash_trigger_for_scroll.clone();
                     move |_| {
+                        // Close link popover on scroll.
+                        if link_popover_pos.get_untracked().is_some() {
+                            link_popover_pos.set(None);
+                            link_popover_url.set(String::new());
+                            link_popover_edit_range.set(None);
+                        }
                         if slash_menu_state.get_untracked().is_none() { return; }
                         let trigger = slash_trigger_scroll.borrow();
                         if let Some(el) = trigger.as_ref() {
@@ -2537,6 +2674,7 @@ pub fn TreeWysiwygEditor(
             />
 
             {floating_toolbar_view}
+            {link_popover_view}
             {slash_menu_view}
         </div>
     }

@@ -1213,6 +1213,56 @@ mod main_tests {
         assert!(found_link, "expected a child with Link mark");
     }
 
+    // ── link_at_cursor / update_link / remove_link ──────────────────
+
+    #[test]
+    fn link_at_cursor_returns_href_and_range() {
+        let mut state = DocState::from_doc(simple_doc());
+        // Select "ell" (positions 2-5) and apply link
+        state.set_selection(Selection::range(2, 5));
+        state.insert_link("https://example.com");
+        // Place cursor inside the linked text
+        state.set_selection(Selection::cursor(3));
+        let result = state.link_at_cursor();
+        assert!(result.is_some());
+        let (href, from, to) = result.unwrap();
+        assert_eq!(href, "https://example.com");
+        assert_eq!(from, 2);
+        assert_eq!(to, 5);
+    }
+
+    #[test]
+    fn link_at_cursor_returns_none_on_plain_text() {
+        let state = DocState::from_doc(simple_doc());
+        // Cursor at position 3, no links
+        let result = state.link_at_cursor();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn update_link_changes_href() {
+        let mut state = DocState::from_doc(simple_doc());
+        state.set_selection(Selection::range(2, 5));
+        state.insert_link("https://old.com");
+        state.update_link(2, 5, "https://new.com");
+        state.set_selection(Selection::cursor(3));
+        let result = state.link_at_cursor();
+        assert!(result.is_some());
+        let (href, _, _) = result.unwrap();
+        assert_eq!(href, "https://new.com");
+    }
+
+    #[test]
+    fn remove_link_removes_mark() {
+        let mut state = DocState::from_doc(simple_doc());
+        state.set_selection(Selection::range(2, 5));
+        state.insert_link("https://example.com");
+        state.remove_link(2, 5);
+        state.set_selection(Selection::cursor(3));
+        let result = state.link_at_cursor();
+        assert!(result.is_none());
+    }
+
     // ── formatting_at_cursor for lists and blockquote ─────────────────
 
     #[test]

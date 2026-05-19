@@ -500,4 +500,97 @@ impl DocState {
         }
         self.redo_stack.clear();
     }
+
+    // ── Link query / mutation ────────────────────────────────────────
+
+    /// Returns `(href, link_from, link_to)` if the cursor is inside a link
+    /// mark, or `None` if there is no link at the cursor position.
+    pub fn link_at_cursor(&self) -> Option<(String, usize, usize)> {
+        let resolved = self.doc.resolve(self.selection.head);
+
+        // Get marks at cursor, with node_before fallback (same pattern as
+        // formatting_at_cursor in selection.rs).
+        let marks = {
+            let m = resolved.marks();
+            if m.is_empty() {
+                if let Some(nb) = resolved.node_before() {
+                    if nb.is_text() {
+                        nb.marks.clone()
+                    } else {
+                        m
+                    }
+                } else {
+                    m
+                }
+            } else {
+                m
+            }
+        };
+
+        // Find the Link mark and extract href.
+        let link_mark = marks.iter().find(|m| m.mark_type == MarkType::Link)?;
+        let href = match crate::attrs::get_attr(&link_mark.attrs, "href") {
+            Some(crate::attrs::AttrValue::String(s)) => s.clone(),
+            _ => return None,
+        };
+
+        // Walk text nodes in the parent textblock to find the contiguous
+        // range that shares the same Link mark with matching href.
+        let parent = resolved.parent();
+        let parent_start = resolved.start(resolved.depth);
+        let mut link_from = None;
+        let mut link_to = None;
+        let mut pos = parent_start;
+
+        for child in parent.content.iter() {
+            let child_end = pos + child.node_size();
+            let has_matching_link = child.is_text()
+                && child.marks.iter().any(|m| {
+                    m.mark_type == MarkType::Link
+                        && matches!(
+                            crate::attrs::get_attr(&m.attrs, "href"),
+                            Some(crate::attrs::AttrValue::String(s)) if *s == href
+                        )
+                });
+            if has_matching_link {
+                if link_from.is_none() {
+                    link_from = Some(pos);
+                }
+                link_to = Some(child_end);
+            } else if link_from.is_some() {
+                // Past the contiguous link range; stop scanning.
+                break;
+            }
+            pos = child_end;
+        }
+
+        match (link_from, link_to) {
+            (Some(from), Some(to)) => Some((href, from, to)),
+            _ => None,
+        }
+    }
+
+    /// Updates the link mark's href in the range `[from, to)`.
+    pub fn update_link(&mut self, from: usize, to: usize, new_url: &str) {
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.remove_mark(from, to, Mark::new(MarkType::Link)).is_ok() {
+            let new_mark =
+                Mark::with_attrs(MarkType::Link, crate::attrs::link_attrs(new_url, None));
+            if tr.add_mark(from, to, new_mark).is_ok() {
+                self.push_undo();
+                self.doc = tr.doc;
+                self.redo_stack.clear();
+            }
+        }
+    }
+
+    /// Removes the link mark from the range `[from, to)`.
+    pub fn remove_link(&mut self, from: usize, to: usize) {
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.remove_mark(from, to, Mark::new(MarkType::Link)).is_ok() {
+            self.push_undo();
+            self.doc = tr.doc;
+            self.redo_stack.clear();
+        }
+    }
 }
