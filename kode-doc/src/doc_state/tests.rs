@@ -3782,22 +3782,51 @@ mod table_editing_tests {
         let mut state = DocState::from_markdown("Hello");
         // pos 1 = inside the paragraph, at "H"
         state.set_selection(Selection::cursor(1));
-        state.insert_table();
+        state.insert_table(3, 3);
 
         let md = serialize_markdown(state.doc());
-        // insert_table creates 3 columns, 1 header + 2 body rows.
-        // Verify the output contains a pipe table with header + delimiter + 2 data rows.
+        // insert_table(3, 3) creates 3 columns, 1 header + 2 body rows.
         let lines: Vec<&str> = md.lines().collect();
         let table_lines: Vec<&&str> = lines.iter().filter(|l| l.starts_with('|')).collect();
         assert!(
             table_lines.len() >= 4,
             "should have at least 4 pipe rows (header + delimiter + 2 data), got: {md:?}"
         );
-        // Check delimiter row exists
         assert!(
             md.contains("| --- | --- | --- |"),
             "should contain a 3-column delimiter row, got: {md:?}"
         );
+    }
+
+    #[test]
+    fn table_insert_table_custom_dimensions() {
+        let mut state = DocState::from_markdown("Hello");
+        state.set_selection(Selection::cursor(1));
+        state.insert_table(2, 2);
+
+        let md = serialize_markdown(state.doc());
+        // 2 cols, 2 rows (1 header + 1 body)
+        assert!(
+            md.contains("| --- | --- |"),
+            "should have 2-column delimiter, got: {md:?}"
+        );
+        let pipe_rows: Vec<&str> = md.lines().filter(|l| l.starts_with('|')).collect();
+        assert_eq!(pipe_rows.len(), 3, "header + delimiter + 1 body row, got: {md:?}");
+    }
+
+    #[test]
+    fn table_insert_table_single_cell() {
+        let mut state = DocState::from_markdown("Hello");
+        state.set_selection(Selection::cursor(1));
+        state.insert_table(1, 1);
+
+        let md = serialize_markdown(state.doc());
+        assert!(
+            md.contains("| --- |"),
+            "should have 1-column delimiter, got: {md:?}"
+        );
+        let pipe_rows: Vec<&str> = md.lines().filter(|l| l.starts_with('|')).collect();
+        assert_eq!(pipe_rows.len(), 2, "header + delimiter only for 1-row table, got: {md:?}");
     }
 
     // ── Row operation tests ───────────────────────────────────────────

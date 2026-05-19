@@ -197,7 +197,8 @@ pub(crate) fn dispatch_builtin_action(ds: &mut kode_doc::DocState, btn: BuiltinB
         BuiltinButton::Link => ds.insert_link("https://"),
         BuiltinButton::CodeBlock => ds.set_block_type(NodeType::CodeBlock, code_block_attrs("")),
         BuiltinButton::HorizontalRule => ds.insert_horizontal_rule(),
-        BuiltinButton::Table => ds.insert_table(),
+        // Reached via slash menu (toolbar button intercepts to show picker instead).
+        BuiltinButton::Table => ds.insert_table(3, 2),
     }
 }
 

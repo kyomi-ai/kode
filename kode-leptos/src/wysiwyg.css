@@ -906,6 +906,62 @@ body.kode-dragging * {
     height: 16px;
 }
 
+/* ── Table Picker ────────────────────────────────────────────────── */
+
+.kode-table-picker {
+    position: absolute;
+    z-index: 25;
+    padding: var(--kode-table-picker-padding, 8px);
+    background: var(--kode-table-picker-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border: var(--kode-table-picker-border-width, 1px) solid var(--kode-table-picker-border-color, var(--kode-border));
+    border-radius: var(--kode-table-picker-border-radius, 8px);
+    box-shadow: var(--kode-table-picker-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
+    user-select: none;
+    animation: kode-link-popover-in 0.1s ease-out;
+}
+
+.kode-table-picker-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.kode-table-picker-row {
+    display: flex;
+    gap: 2px;
+}
+
+.kode-table-picker-cell {
+    width: var(--kode-table-picker-cell-size, 20px);
+    height: var(--kode-table-picker-cell-size, 20px);
+    border: 1px solid var(--kode-table-picker-cell-border, var(--kode-border));
+    border-radius: 2px;
+    cursor: pointer;
+    background: var(--kode-table-picker-cell-bg, transparent);
+}
+
+.kode-table-picker-cell.selected {
+    background: var(--kode-table-picker-cell-selected-bg, var(--kode-accent));
+    border-color: var(--kode-table-picker-cell-selected-border, var(--kode-accent));
+}
+
+.kode-table-picker-label {
+    text-align: center;
+    margin-top: 6px;
+    font-size: var(--kode-table-picker-label-font-size, 12px);
+    color: var(--kode-table-picker-label-color, var(--kode-fg-dim));
+    font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+}
+
+/* ── Empty table cell placeholders ───────────────────────────────── */
+
+.wysiwyg-scroll-container th:empty::before {
+    content: "Header";
+    color: var(--kode-table-placeholder-color, var(--kode-fg-dim));
+    opacity: 0.4;
+    font-style: italic;
+}
+
 /* .kode-text-segment — wrapper div for text blocks in segment-based rendering.
    No visual styles needed; used as an innerHTML update target by patch_segments(). */
 
