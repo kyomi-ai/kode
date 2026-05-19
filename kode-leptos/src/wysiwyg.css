@@ -536,6 +536,8 @@ div.wysiwyg-code-block code {
     position: relative;
     padding: var(--kode-content-padding, 1.5rem 2rem);
     outline: none;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .tree-wysiwyg-scroll-container ::selection {

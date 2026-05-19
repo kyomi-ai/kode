@@ -1195,5 +1195,27 @@ mod tests {
         let pos = ed.word_start_before_cursor();
         assert_eq!(pos, Position::new(0, 0)); // start of "hello"
     }
+
+    #[test]
+    fn insert_multiple_spaces_at_end_of_line() {
+        let mut ed = Editor::new("hello");
+        ed.set_cursor(Position::new(0, 5));
+
+        ed.insert(" ");
+        assert_eq!(ed.text(), "hello ");
+        assert_eq!(ed.cursor(), Position::new(0, 6));
+
+        ed.insert(" ");
+        assert_eq!(ed.text(), "hello  ");
+        assert_eq!(ed.cursor(), Position::new(0, 7));
+
+        ed.insert(" ");
+        assert_eq!(ed.text(), "hello   ");
+        assert_eq!(ed.cursor(), Position::new(0, 8));
+
+        ed.insert(" ");
+        assert_eq!(ed.text(), "hello    ");
+        assert_eq!(ed.cursor(), Position::new(0, 9));
+    }
 }
 
