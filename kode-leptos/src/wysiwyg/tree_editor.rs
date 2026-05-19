@@ -137,7 +137,7 @@ pub fn TreeWysiwygEditor(
     let dom_dirty = std::rc::Rc::new(std::cell::Cell::new(false));
     let mutation_observer: std::rc::Rc<std::cell::RefCell<Option<web_sys::MutationObserver>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
-    let floating_pos: RwSignal<Option<f64>> = RwSignal::new(None);
+    let floating_pos: RwSignal<Option<(f64, f64, bool)>> = RwSignal::new(None);
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
     struct DragState {
@@ -1950,8 +1950,8 @@ pub fn TreeWysiwygEditor(
                         .map(|p| p.get_bounding_client_rect())
                         .unwrap_or_else(|| container_el.get_bounding_client_rect());
 
-                    let top = range_rect.top() - parent_rect.top() - 8.0;
-                    floating_pos.set(Some(top));
+                    let pos = compute_floating_toolbar_pos(&range_rect, &parent_rect);
+                    floating_pos.set(Some(pos));
                 }
             } else {
                 floating_pos.set(None);
@@ -2024,8 +2024,8 @@ pub fn TreeWysiwygEditor(
                     .map(|p| p.get_bounding_client_rect())
                     .unwrap_or_else(|| container_el.get_bounding_client_rect());
 
-                let top = range_rect.top() - parent_rect.top() - 8.0;
-                floating_pos.set(Some(top));
+                let pos = compute_floating_toolbar_pos(&range_rect, &parent_rect);
+                floating_pos.set(Some(pos));
             }
         });
 
@@ -2092,7 +2092,14 @@ pub fn TreeWysiwygEditor(
             <div class="kode-floating-toolbar"
                 style=move || {
                     match floating_pos.get() {
-                        Some(top) => format!("display:flex;top:{top}px;"),
+                        Some((top, left, flipped)) => {
+                            let transform = if flipped {
+                                "transform:translateX(-50%);"
+                            } else {
+                                "transform:translate(-50%,-100%);"
+                            };
+                            format!("display:flex;top:{top}px;left:{left}px;{transform}")
+                        }
                         None => "display:none;".to_string(),
                     }
                 }
@@ -2949,6 +2956,10 @@ pub fn TreeWysiwygEditor(
                 on:scroll={
                     let slash_trigger_scroll = slash_trigger_for_scroll.clone();
                     move |_| {
+                        // Close floating toolbar on scroll.
+                        if floating_pos.get_untracked().is_some() {
+                            floating_pos.set(None);
+                        }
                         // Close link popover on scroll.
                         if link_popover_pos.get_untracked().is_some() {
                             link_popover_pos.set(None);
@@ -2989,6 +3000,26 @@ pub fn TreeWysiwygEditor(
             {slash_menu_view}
         </div>
     }
+}
+
+/// Compute position for the floating toolbar above/below the selection range.
+///
+/// Defaults to placing the toolbar ABOVE the selection. Flips below when the
+/// selection is near the top of the viewport (less than 50 px of space).
+/// Returns `(top, left, flipped)` in the container's coordinate space.
+fn compute_floating_toolbar_pos(
+    range_rect: &web_sys::DomRect,
+    container_rect: &web_sys::DomRect,
+) -> (f64, f64, bool) {
+    let gap = 8.0;
+    let flip = range_rect.top() < 50.0;
+    let top = if flip {
+        range_rect.bottom() - container_rect.top() + gap
+    } else {
+        range_rect.top() - container_rect.top() - gap
+    };
+    let left = (range_rect.left() + range_rect.right()) / 2.0 - container_rect.left();
+    (top, left, flip)
 }
 
 fn compute_slash_menu_pos(el: &web_sys::Element) -> Option<(f64, f64, f64, bool)> {
