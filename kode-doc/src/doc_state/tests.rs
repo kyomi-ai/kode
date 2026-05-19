@@ -740,6 +740,56 @@ mod main_tests {
         assert_eq!(state.doc.child(0).text_content(), "Hello");
     }
 
+    #[test]
+    fn backspace_empty_para_in_blockquote_preserves_blockquote() {
+        // <doc><blockquote><p>Line one</p><p></p><p>Line three</p></blockquote></doc>
+        // Cursor at start of the empty middle paragraph.
+        // Backspace should delete the empty paragraph, NOT unwrap the blockquote.
+        let p1 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Line one")),
+        );
+        let p2 = Node::branch(NodeType::Paragraph, Fragment::empty());
+        let p3 = Node::branch(
+            NodeType::Paragraph,
+            Fragment::from_node(Node::new_text("Line three")),
+        );
+        let bq = Node::branch(
+            NodeType::Blockquote,
+            Fragment::from_vec(vec![p1, p2, p3]),
+        );
+        let doc = Node::branch(NodeType::Doc, Fragment::from_node(bq));
+
+        let mut state = DocState::from_doc(doc);
+
+        // Position inside the empty paragraph:
+        // doc(0) > bq(1) > p1(2)..."Line one"(3-10) > /p1(11) > p2(12) > content_start(13)
+        // p2 is empty so its content start = 12 (bq_open + p1_size + p2_open)
+        // bq_open = 1, p1 size = "Line one".len() + 2 = 10, p2_open at 11, content at 12
+        // Actually: doc_open not counted in content positions.
+        // pos 0 = before bq, pos 1 = inside bq before p1
+        // p1: open=1, content 2..10 ("Line one" = 8 chars), close=10
+        // Wait, bq open = position 0 in doc content? No...
+        // Let me compute: doc has one child (bq). bq starts at position 0 in doc content.
+        // Inside bq: position 1 is inside bq content.
+        // p1 starts at position 1 (inside bq). p1 content starts at position 2.
+        // "Line one" = 8 chars, positions 2-9. p1 ends at position 10.
+        // p2 starts at position 10. p2 content starts at position 11. p2 is empty. p2 ends at 11.
+        // Wait, empty paragraph: open + close = 2 tokens, 0 content. So p2 occupies positions 10-11 (size 2).
+        // p2 content start = 11. That's where the cursor should be.
+        state.set_selection(Selection::cursor(12));
+
+        state.backspace();
+
+        // The blockquote should still exist with p1 and p3.
+        assert_eq!(state.doc.child_count(), 1, "doc should have 1 child");
+        let bq = state.doc.child(0);
+        assert_eq!(bq.node_type, NodeType::Blockquote, "child should be blockquote");
+        assert_eq!(bq.child_count(), 2, "blockquote should have 2 paragraphs");
+        assert_eq!(bq.child(0).text_content(), "Line one");
+        assert_eq!(bq.child(1).text_content(), "Line three");
+    }
+
     // ── list tests ───────────────────────────────────────────────────
 
     #[test]

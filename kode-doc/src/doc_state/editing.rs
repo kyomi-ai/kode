@@ -231,9 +231,36 @@ impl DocState {
                         let cursor = delete_from.min(self.doc.content.size());
                         self.selection = Selection::cursor(cursor);
                     }
+                } else if wrapper_node.node_type == NodeType::Blockquote
+                    && resolved.index(wd) > 0
+                {
+                    // Non-first child inside a blockquote: merge with the
+                    // previous sibling by deleting the structural tokens
+                    // (close of prev paragraph + open of current paragraph)
+                    // between the end of the previous block's content and
+                    // the start of this textblock's content.
+                    let prev_idx = resolved.index(wd) - 1;
+                    let prev_child = wrapper_node.child(prev_idx);
+                    let bq_content_start = resolved.start(wd);
+                    let mut prev_start = bq_content_start;
+                    for i in 0..prev_idx {
+                        prev_start += wrapper_node.child(i).node_size();
+                    }
+                    let delete_from = if prev_child.node_type.is_textblock() {
+                        prev_start + 1 + prev_child.content.size()
+                    } else {
+                        prev_start + prev_child.node_size()
+                    };
+                    let mut tr = Transform::new(self.doc.clone());
+                    if tr.delete(delete_from, from).is_ok() {
+                        self.doc = tr.doc;
+                        let cursor = delete_from.min(self.doc.content.size());
+                        self.selection = Selection::cursor(cursor);
+                    }
                 } else {
-                    // Non-empty: replace the wrapper with its children,
-                    // effectively lifting the content one level up.
+                    // Non-empty wrapper, first child or unknown wrapper type:
+                    // replace the wrapper with its children, effectively
+                    // lifting the content one level up.
                     let inner_content = wrapper_node.content.clone();
                     let slice = Slice::new(inner_content, 0, 0);
                     let mut tr = Transform::new(self.doc.clone());

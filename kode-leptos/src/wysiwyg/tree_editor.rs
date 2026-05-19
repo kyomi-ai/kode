@@ -467,6 +467,8 @@ pub fn TreeWysiwygEditor(
             // positions so the replacement overwrites the correct text.
             // Skip ranges that cross block boundaries — they include
             // structural positions that the browser doesn't understand.
+            // TODO: adopt ProseMirror's approach of letting the browser
+            // modify the DOM and syncing back, instead of preventDefault.
             if let Some(ref c) = container {
                 let target_ranges = input_ev.get_target_ranges();
                 if target_ranges.length() > 0 {
