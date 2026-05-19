@@ -1212,4 +1212,27 @@ impl DocState {
         }
         self.redo_stack.clear();
     }
+
+    /// Delete the entire table at the cursor position.
+    ///
+    /// No-op if the cursor is not inside a table.
+    pub fn delete_table(&mut self) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let resolved = self.doc.resolve(self.selection.head);
+        let table_start = resolved.before(ctx.table_depth);
+        let table_end = resolved.after(ctx.table_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(table_start, table_end).is_ok() {
+            self.doc = tr.doc;
+            let max = self.doc.content.size();
+            self.selection = Selection::cursor(table_start.min(max));
+            self.redo_stack.clear();
+        }
+    }
 }
