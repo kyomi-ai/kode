@@ -81,7 +81,6 @@
 .kode-floating-toolbar {
     position: absolute;
     z-index: 20;
-    left: 50%;
     display: flex;
     align-items: center;
     gap: var(--kode-toolbar-gap, 2px);
@@ -93,14 +92,13 @@
     font-family: var(--kode-toolbar-font-family, var(--kode-font-family, 'JetBrains Mono', 'Fira Code', monospace));
     font-size: var(--kode-toolbar-font-size, 13px);
     user-select: none;
-    transform: translate(-50%, -100%);
     pointer-events: auto;
     animation: kode-floating-toolbar-in 0.12s ease-out;
 }
 
 @keyframes kode-floating-toolbar-in {
-    from { opacity: 0; transform: translate(-50%, -100%) translateY(4px); }
-    to   { opacity: 1; transform: translate(-50%, -100%) translateY(0); }
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 /* ── WYSIWYG Block Renderer Styles ─────────────────────────────────── */
