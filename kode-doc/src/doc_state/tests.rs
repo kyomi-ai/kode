@@ -137,6 +137,50 @@ mod main_tests {
     }
 
     #[test]
+    fn insert_text_inside_bold_preserves_mark_boundaries() {
+        let mut ds = DocState::from_markdown("Hello **bold text** world");
+        let initial = ds.to_markdown();
+        assert!(initial.contains("**bold text**"), "setup: {initial}");
+
+        // "Hello " = 6 chars, "bold text" = 9 chars. Paragraph starts at 1.
+        // Position inside "bold" at offset 4 (after "bold"): 1 + 6 + 4 = 11
+        ds.set_selection(Selection::cursor(11));
+        ds.insert_text("X");
+
+        let md = ds.to_markdown();
+        assert_eq!(md, "Hello **boldX text** world", "after insert: {md}");
+    }
+
+    #[test]
+    fn insert_text_inside_bold_after_heading() {
+        // Simulate the demo document structure
+        let mut ds = DocState::from_markdown(
+            "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions."
+        );
+        let md0 = ds.to_markdown();
+        assert!(md0.contains("**monthly revenue**"), "setup: {md0}");
+
+        // Heading: pos 0, node_size = 1 + 23 + 1 = 25
+        // Paragraph: pos 25, content_start = 26
+        // "This dashboard tracks " = 22 chars (positions 26-47)
+        // "monthly revenue" = 15 chars (positions 48-62, bold)
+        // " across all regions." = 20 chars (positions 63-82)
+        // Insert 'x' at position 55 (after "monthly", offset 29 in paragraph)
+        ds.set_selection(Selection::cursor(55));
+        ds.insert_text("x");
+
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("**monthlyx revenue**"),
+            "bold should wrap only 'monthlyx revenue', got: {md}"
+        );
+        assert!(
+            md.contains("across all regions."),
+            "trailing text should NOT be bold, got: {md}"
+        );
+    }
+
+    #[test]
     fn insert_empty_text_is_noop() {
         let mut state = DocState::from_doc(simple_doc());
         state.set_selection(Selection::cursor(3));

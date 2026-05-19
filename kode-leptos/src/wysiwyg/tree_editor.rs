@@ -132,6 +132,10 @@ pub fn TreeWysiwygEditor(
     let editor_ref = NodeRef::<leptos::html::Div>::new();
     let keydown_handled = std::rc::Rc::new(std::cell::Cell::new(false));
     let mouse_selecting = std::rc::Rc::new(std::cell::Cell::new(false));
+    let observing_dom_input = std::rc::Rc::new(std::cell::Cell::new(false));
+    let dom_dirty = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mutation_observer: std::rc::Rc<std::cell::RefCell<Option<web_sys::MutationObserver>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
     let floating_pos: RwSignal<Option<f64>> = RwSignal::new(None);
 
     // ── Drag-and-drop state (Cell-based to avoid reactive re-renders) ──
@@ -331,6 +335,10 @@ pub fn TreeWysiwygEditor(
     let ext_ctx_for_effect = extension_context.clone();
     let can_drag_for_effect = can_drag_block.clone();
     let keydown_handled_effect = keydown_handled.clone();
+    let mo_for_patch = mutation_observer.clone();
+    let keydown_handled_for_mo = keydown_handled.clone();
+    let dom_dirty_for_effect = dom_dirty.clone();
+    let dom_dirty_for_mo = dom_dirty.clone();
     Effect::new(move |_| {
         let _v = version.get();
         let is_composing = composing.get();
@@ -367,10 +375,27 @@ pub fn TreeWysiwygEditor(
             let new_segs = segments_memo.get();
             if let Some(container) = editor_ref.get_untracked() {
                 let container_el: &web_sys::Element = container.as_ref();
-                // Remove the gap cursor before patching so it doesn't
-                // shift child indices and corrupt the slot matching.
                 hide_gap_cursor(container_el);
+
+                // Disconnect MutationObserver during patching to prevent
+                // our own innerHTML writes from being observed.
+                if let Some(ref mo) = *mo_for_patch.borrow() {
+                    mo.disconnect();
+                }
+
                 let mut old = prev_segments_for_effect.borrow_mut();
+
+                // If the DOM was modified by browser-native text input (MO
+                // path), prev_segments is stale. Clear both the cache and
+                // the DOM children so patch_segments does a full rebuild.
+                if dom_dirty_for_effect.get() {
+                    old.clear();
+                    while let Some(child) = container_el.first_child() {
+                        let _ = container_el.remove_child(&child);
+                    }
+                    dom_dirty_for_effect.set(false);
+                }
+
                 patch_segments(
                     container_el,
                     &old,
@@ -381,13 +406,23 @@ pub fn TreeWysiwygEditor(
                     can_drag_for_effect.as_deref(),
                 );
                 *old = new_segs;
+
+                // Reconnect the observer after patching.
+                if let Some(ref mo) = *mo_for_patch.borrow() {
+                    let opts = web_sys::MutationObserverInit::new();
+                    opts.set_character_data(true);
+                    opts.set_character_data_old_value(true);
+                    opts.set_child_list(true);
+                    opts.set_subtree(true);
+                    let _ = mo.observe_with_options(container_el, &opts);
+                }
             }
         }
 
         // Keep the variables alive for the wasm32 cfg block above.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (&segments_memo, &prev_segments_for_effect, &ext_ctx_for_effect, &can_drag_for_effect);
+            let _ = (&segments_memo, &prev_segments_for_effect, &ext_ctx_for_effect, &can_drag_for_effect, &mo_for_patch, &dom_dirty_for_effect);
         }
 
         let doc_raf = doc_for_sel.clone();
@@ -410,9 +445,6 @@ pub fn TreeWysiwygEditor(
                 show_gap_cursor(container_el, side, block_start, block_end);
                 let _ = container_el.dyn_ref::<HtmlElement>()
                     .map(|el| el.style().set_property("caret-color", "transparent"));
-                // Keep kd_handled set — selectionchange must stay suppressed
-                // while the gap cursor is active, otherwise the browser's
-                // stale cursor position overwrites the gap position.
             } else {
                 hide_gap_cursor(container_el);
                 kd_handled_raf.set(false);
@@ -436,6 +468,7 @@ pub fn TreeWysiwygEditor(
         let notify_input = notify.clone();
         let editor_input = editor_ref;
         let kd_handled_input = keydown_handled.clone();
+        let observing_input = observing_dom_input.clone();
 
         let beforeinput_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
             if readonly { return; }
@@ -448,27 +481,61 @@ pub fn TreeWysiwygEditor(
 
             let input_type = input_ev.input_type();
 
-            // Prevent the browser from modifying the DOM directly.
-            input_ev.prevent_default();
-
             let container: Option<web_sys::Element> = editor_input
                 .get_untracked()
                 .map(|el| el.unchecked_ref::<web_sys::Element>().clone());
 
+            // For text insertion outside code blocks, let the browser modify the
+            // DOM natively (ProseMirror-style). The MutationObserver will pick up
+            // the change and sync it back to DocState. This allows OS features
+            // like autocorrect and double-space-to-period to work.
+            if matches!(input_type.as_str(), "insertText" | "insertReplacementText") {
+                let Ok(mut ds) = doc_input.lock() else { return };
+                if let Some(ref c) = container {
+                    sync_selection_to_doc(&mut ds, c);
+                }
+
+                // Code blocks use syntax-highlighted spans that won't survive
+                // browser mutations — fall back to the preventDefault path.
+                let in_code_block = {
+                    let resolved = ds.doc().resolve(ds.selection().head);
+                    resolved.parent().node_type == NodeType::CodeBlock
+                };
+
+                if in_code_block {
+                    input_ev.prevent_default();
+                    if let Some(data) = input_ev.data() {
+                        if !data.is_empty() {
+                            ds.insert_text(&data);
+                        }
+                    }
+                    let md = ds.to_markdown();
+                    drop(ds);
+                    kd_handled_input.set(true);
+                    (notify_input)(Some(md));
+                    return;
+                }
+
+                // Let the browser handle text insertion natively. The
+                // MutationObserver will diff the DOM change and sync it
+                // back to DocState. Don't modify DocState here — the MO
+                // callback computes its own ranges from the actual DOM diff.
+                drop(ds);
+                observing_input.set(true);
+                kd_handled_input.set(true);
+                return;
+            }
+
+            // All non-text-insertion input types: preventDefault and handle manually.
+            input_ev.prevent_default();
+
             let Ok(mut ds) = doc_input.lock() else { return };
 
-            // Sync browser selection -> DocState before the operation.
             if let Some(ref c) = container {
                 sync_selection_to_doc(&mut ds, c);
             }
 
-            // Use getTargetRanges() for OS-level text replacements
-            // (e.g. spellcheck corrections). Map the target range to doc
-            // positions so the replacement overwrites the correct text.
-            // Skip ranges that cross block boundaries — they include
-            // structural positions that the browser doesn't understand.
-            // TODO: adopt ProseMirror's approach of letting the browser
-            // modify the DOM and syncing back, instead of preventDefault.
+            // Use getTargetRanges() for OS-level text replacements.
             if let Some(ref c) = container {
                 let target_ranges = input_ev.get_target_ranges();
                 if target_ranges.length() > 0 {
@@ -489,13 +556,6 @@ pub fn TreeWysiwygEditor(
             }
 
             match input_type.as_str() {
-                "insertText" | "insertReplacementText" => {
-                    if let Some(data) = input_ev.data() {
-                        if !data.is_empty() {
-                            ds.insert_text(&data);
-                        }
-                    }
-                }
                 "insertParagraph" | "insertLineBreak" => {
                     ds.split_block();
                 }
@@ -506,7 +566,6 @@ pub fn TreeWysiwygEditor(
                     ds.delete_forward();
                 }
                 "insertFromPaste" => {
-                    // Read clipboard data from the event's dataTransfer.
                     let dt = input_ev.data_transfer();
                     if let Some(dt) = dt {
                         let html_data = dt.get_data("text/html").unwrap_or_default();
@@ -535,13 +594,8 @@ pub fn TreeWysiwygEditor(
                 "formatUnderline" => {
                     ds.toggle_mark(MarkType::Strike);
                 }
-                "insertFromDrop" => {
-                    // Ignore drag-and-drop for now
-                }
-                _ => {
-                    // All other input types are prevented (we already called
-                    // preventDefault) — the browser won't modify the DOM.
-                }
+                "insertFromDrop" => {}
+                _ => {}
             }
 
             let md = ds.to_markdown();
@@ -696,14 +750,18 @@ pub fn TreeWysiwygEditor(
         // Store closures for attachment after mount
         let closures = std::cell::RefCell::new(Some((beforeinput_cb, copy_cb, cut_cb, paste_cb)));
 
+        // ── MutationObserver for DOM-observation text input ────────────
+        let doc_mo = doc_state.clone();
+        let on_change_mo = on_change.clone();
+        let observing_mo = observing_dom_input.clone();
+        let mo_store = mutation_observer.clone();
+        let editor_mo = editor_ref;
+
         Effect::new(move |_| {
             let Some(el) = editor_input.get_untracked() else { return };
             let Some((bi_cb, cp_cb, ct_cb, pa_cb)) = closures.borrow_mut().take() else {
                 return; // Already attached.
             };
-            let html_el: &web_sys::Element = el.as_ref();
-            let _ = html_el.set_attribute("autocorrect", "off");
-            let _ = html_el.set_attribute("autocapitalize", "off");
             let target: &web_sys::EventTarget = el.as_ref();
             let _ = target.add_event_listener_with_callback(
                 "beforeinput",
@@ -722,6 +780,126 @@ pub fn TreeWysiwygEditor(
                 pa_cb.as_ref().unchecked_ref(),
             );
 
+            // Create the MutationObserver for DOM-observation text input.
+            let container_for_mo: web_sys::Element =
+                editor_mo.get_untracked().unwrap().unchecked_ref::<web_sys::Element>().clone();
+            let mo_cb = Closure::<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>::new({
+                let doc_mo = doc_mo.clone();
+                let on_change_mo = on_change_mo.clone();
+                let observing_mo = observing_mo.clone();
+                let container_mo = container_for_mo.clone();
+                let kd_handled_mo = keydown_handled_for_mo.clone();
+                let dom_dirty_mo = dom_dirty_for_mo.clone();
+                move |records: js_sys::Array, _observer: web_sys::MutationObserver| {
+                    if !observing_mo.get() {
+                        return;
+                    }
+                    observing_mo.set(false);
+
+                    let Ok(mut ds) = doc_mo.lock() else { return };
+
+                    // Collect unique positioned blocks that were affected by
+                    // mutations. We diff the full block text (DOM vs DocState)
+                    // once per block, which correctly handles multi-record
+                    // mutations like macOS autocorrect replacements.
+                    let mut seen_starts: Vec<usize> = Vec::new();
+                    let mut changed = false;
+
+                    for i in 0..records.length() {
+                        let record: web_sys::MutationRecord = records.get(i).unchecked_into();
+                        let Some(target_node) = record.target() else { continue };
+
+                        let Some(pos_el) = find_pos_ancestor(&target_node, &container_mo) else {
+                            continue;
+                        };
+                        let Some(el_start) = pos_el.get_attribute("data-pos-start")
+                            .and_then(|s| s.parse::<usize>().ok()) else { continue };
+
+                        if seen_starts.contains(&el_start) {
+                            continue;
+                        }
+                        seen_starts.push(el_start);
+
+                        let el_end = pos_el.get_attribute("data-pos-end")
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .unwrap_or(el_start);
+
+                        let dom_text = pos_el.text_content().unwrap_or_default();
+                        let doc_text = ds.text_between(el_start, el_end)
+                            .trim_end_matches('\n')
+                            .to_string();
+
+                        if dom_text == doc_text {
+                            continue;
+                        }
+
+                        let (prefix, suffix) = diff_strings(&doc_text, &dom_text);
+                        let doc_len = doc_text.chars().count();
+                        let dom_len = dom_text.chars().count();
+
+                        let del_from = el_start + prefix;
+                        let del_to = el_start + doc_len - suffix;
+
+                        if del_from != del_to {
+                            ds.set_selection(Selection::range(del_from, del_to));
+                        } else {
+                            ds.set_selection(Selection::cursor(del_from));
+                        }
+
+                        let inserted: String = dom_text.chars()
+                            .skip(prefix)
+                            .take(dom_len - prefix - suffix)
+                            .collect();
+
+                        if !inserted.is_empty() {
+                            ds.insert_text(&inserted);
+                        } else if del_from != del_to {
+                            ds.backspace();
+                        }
+                        changed = true;
+                    }
+
+                    if !changed {
+                        return;
+                    }
+
+                    // ProseMirror-style: do NOT re-render the DOM. The browser
+                    // already applied the text change correctly. Just update
+                    // DocState, emit on_change, update formatting, and fix the
+                    // stale data-pos attributes in-place. Mark the DOM as
+                    // dirty so the next full re-render rewrites all blocks.
+                    dom_dirty_mo.set(true);
+                    let md = ds.to_markdown();
+                    let fmt = ds.formatting_at_cursor();
+                    drop(ds);
+
+                    if let Some(ref cb) = on_change_mo {
+                        cb(md);
+                    }
+                    formatting_state.set(fmt);
+
+                    // Update data-pos attributes on all positioned elements so
+                    // subsequent operations map positions correctly.
+                    refresh_pos_attributes(&container_mo, &doc_mo);
+
+                    // Clear the keydown-handled flag so selectionchange events
+                    // are processed normally (e.g., arrow keys, clicks).
+                    kd_handled_mo.set(false);
+                }
+            });
+
+            let observer = web_sys::MutationObserver::new(mo_cb.as_ref().unchecked_ref())
+                .expect("MutationObserver::new failed");
+            let opts = web_sys::MutationObserverInit::new();
+            opts.set_character_data(true);
+            opts.set_character_data_old_value(true);
+            opts.set_child_list(true);
+            opts.set_subtree(true);
+            let _ = observer.observe_with_options(&container_for_mo, &opts);
+            *mo_store.borrow_mut() = Some(observer);
+
+            let mo_cb_wrap = send_wrapper::SendWrapper::new(mo_cb);
+
             let bi_fn: js_sys::Function = bi_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
             let cp_fn: js_sys::Function = cp_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
             let ct_fn: js_sys::Function = ct_cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
@@ -731,16 +909,21 @@ pub fn TreeWysiwygEditor(
             let ct_wrap = send_wrapper::SendWrapper::new(ct_cb);
             let pa_wrap = send_wrapper::SendWrapper::new(pa_cb);
 
+            let mo_store_cleanup = send_wrapper::SendWrapper::new(mo_store.clone());
             let cleanup_el: web_sys::EventTarget = target.clone();
             on_cleanup(move || {
                 let _ = cleanup_el.remove_event_listener_with_callback("beforeinput", &bi_fn);
                 let _ = cleanup_el.remove_event_listener_with_callback("copy", &cp_fn);
                 let _ = cleanup_el.remove_event_listener_with_callback("cut", &ct_fn);
                 let _ = cleanup_el.remove_event_listener_with_callback("paste", &pa_fn);
+                if let Some(ref mo) = *mo_store_cleanup.borrow() {
+                    mo.disconnect();
+                }
                 drop(bi_wrap);
                 drop(cp_wrap);
                 drop(ct_wrap);
                 drop(pa_wrap);
+                drop(mo_cb_wrap);
             });
         });
     }
@@ -2583,6 +2766,78 @@ fn sync_selection_to_doc(ds: &mut DocState, container: &web_sys::Element) {
     }
 }
 
+/// Walk all positioned DOM elements and update their `data-pos-start`/
+/// `data-pos-end` attributes to match the current DocState. Called after the
+/// MutationObserver syncs a text change without a full re-render.
+fn refresh_pos_attributes(
+    container: &web_sys::Element,
+    doc_state: &Arc<Mutex<DocState>>,
+) {
+    let Ok(ds) = doc_state.lock() else { return };
+    let doc = ds.doc();
+
+    let Ok(positioned) = container.query_selector_all("[data-pos-start]") else { return };
+
+    // Collect expected (content_start, content_end) for every positioned node
+    // by walking the doc tree in document order.
+    let mut expected: Vec<(usize, usize)> = Vec::new();
+    collect_block_positions(doc, 0, &mut expected);
+
+    // Match in order — there should be a 1:1 correspondence.
+    let count = positioned.length().min(expected.len() as u32);
+    for i in 0..count {
+        let Some(node) = positioned.item(i) else { continue };
+        let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
+        let (cs, ce) = expected[i as usize];
+        let _ = el.set_attribute("data-pos-start", &cs.to_string());
+        let _ = el.set_attribute("data-pos-end", &ce.to_string());
+    }
+}
+
+/// Recursively collect (content_start, content_end) for all block nodes
+/// that would have data-pos-start/data-pos-end attributes in the DOM.
+fn collect_block_positions(
+    node: &kode_doc::Node,
+    start: usize,
+    out: &mut Vec<(usize, usize)>,
+) {
+    if node.node_type == kode_doc::NodeType::Doc {
+        let mut pos = 0usize;
+        for child in node.content.iter() {
+            collect_block_positions(child, pos, out);
+            pos += child.node_size();
+        }
+        return;
+    }
+
+    if !node.node_type.is_block() {
+        return;
+    }
+
+    // Leaf blocks (HR, image, file) and atomic extension blocks use
+    // data-pos-start=start, data-pos-end=start+node_size.
+    // Branch text blocks (paragraph, heading, code, etc.) use
+    // data-pos-start=start+1, data-pos-end=start+1+content.size().
+    if node.node_type.is_leaf() || node.is_atom() {
+        out.push((start, start + node.node_size()));
+    } else {
+        let content_start = start + 1;
+        let content_end = content_start + node.content.size();
+        out.push((content_start, content_end));
+
+        // Recurse into container blocks (blockquote, list, list_item, table).
+        if node.content.child_count() > 0 {
+            let mut pos = content_start;
+            for child in node.content.iter() {
+                if child.node_type.is_block() {
+                    collect_block_positions(child, pos, out);
+                }
+                pos += child.node_size();
+            }
+        }
+    }
+}
+
 /// Convert a DOM (node, offset) pair to a DocState position.
 ///
 /// Walks up from the node to find the nearest ancestor with a `data-pos-start`
@@ -2767,6 +3022,25 @@ fn restore_range(container: &web_sys::Element, anchor_pos: usize, head_pos: usiz
         }
         (None, None) => {}
     }
+}
+
+/// Returns (common_prefix_chars, common_suffix_chars) between two strings.
+/// The changed region in `old` is `old[prefix..old_len-suffix]` and in `new`
+/// is `new[prefix..new_len-suffix]`.
+fn diff_strings(old: &str, new: &str) -> (usize, usize) {
+    let old_chars: Vec<char> = old.chars().collect();
+    let new_chars: Vec<char> = new.chars().collect();
+
+    let prefix = old_chars.iter().zip(new_chars.iter()).take_while(|(a, b)| a == b).count();
+
+    let suffix = old_chars[prefix..]
+        .iter()
+        .rev()
+        .zip(new_chars[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    (prefix, suffix)
 }
 
 /// Find the DOM text node and UTF-16 offset for a given DocState position.
@@ -3516,5 +3790,62 @@ fn attachment_insert_to_node(insert: &super::attachment::AttachmentInsert) -> ko
                 kode_doc::attrs::file_block_attrs(href, filename, attachment_id.as_deref(), *size_bytes, content_type.as_deref()),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diff_strings;
+
+    #[test]
+    fn append_single_char() {
+        assert_eq!(diff_strings("hello", "hellox"), (5, 0));
+    }
+
+    #[test]
+    fn prepend_single_char() {
+        assert_eq!(diff_strings("hello", "xhello"), (0, 5));
+    }
+
+    #[test]
+    fn insert_middle() {
+        assert_eq!(diff_strings("helo", "hello"), (3, 1));
+    }
+
+    #[test]
+    fn replace_char() {
+        // "text " → "text." : prefix=4, suffix=0
+        assert_eq!(diff_strings("text ", "text."), (4, 0));
+    }
+
+    #[test]
+    fn autocorrect_space_to_period_space() {
+        // macOS double-space-to-period: "text " → "text. "
+        assert_eq!(diff_strings("text ", "text. "), (4, 1));
+    }
+
+    #[test]
+    fn delete_suffix() {
+        assert_eq!(diff_strings("hello", "hel"), (3, 0));
+    }
+
+    #[test]
+    fn identical_strings() {
+        assert_eq!(diff_strings("same", "same"), (4, 0));
+    }
+
+    #[test]
+    fn empty_to_text() {
+        assert_eq!(diff_strings("", "new"), (0, 0));
+    }
+
+    #[test]
+    fn text_to_empty() {
+        assert_eq!(diff_strings("old", ""), (0, 0));
+    }
+
+    #[test]
+    fn unicode_chars() {
+        assert_eq!(diff_strings("café", "café!"), (4, 0));
     }
 }
