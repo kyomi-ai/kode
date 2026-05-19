@@ -339,11 +339,16 @@ impl DocState {
         }
     }
 
-    /// Insert a table (3 columns, 1 header + 2 body rows) at the cursor position.
+    /// Insert a table with the given dimensions at the cursor position.
+    ///
+    /// `cols` is the number of columns. `rows` is the total number of rows
+    /// including the header row (so `rows = 2` means 1 header + 1 body row).
     ///
     /// If the cursor is inside a textblock, splits the block first, then
     /// inserts the table between the two halves.
-    pub fn insert_table(&mut self) {
+    pub fn insert_table(&mut self, cols: usize, rows: usize) {
+        let cols = cols.max(1);
+        let rows = rows.max(1);
         let from = self.selection.from();
         let to = self.selection.to();
 
@@ -361,7 +366,6 @@ impl DocState {
         // Resolve position to check context.
         let resolved = tr.doc.resolve(pos);
 
-        // Build the table structure: 3 columns, 1 header row + 2 body rows.
         fn make_empty_cell() -> Node {
             Node::branch(NodeType::TableCell, Fragment::empty())
         }
@@ -371,12 +375,13 @@ impl DocState {
             Node::branch(row_type, Fragment::from_vec(cells))
         }
 
-        let header = make_row(3, NodeType::TableHeader);
-        let row1 = make_row(3, NodeType::TableRow);
-        let row2 = make_row(3, NodeType::TableRow);
+        let mut table_rows = vec![make_row(cols, NodeType::TableHeader)];
+        for _ in 1..rows {
+            table_rows.push(make_row(cols, NodeType::TableRow));
+        }
         let table = Node::branch(
             NodeType::Table,
-            Fragment::from_vec(vec![header, row1, row2]),
+            Fragment::from_vec(table_rows),
         );
 
         if resolved.parent().node_type.is_textblock() {

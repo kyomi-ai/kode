@@ -183,6 +183,11 @@ pub fn TreeWysiwygEditor(
     let link_popover_url = RwSignal::new(String::new());
     let link_popover_edit_range: RwSignal<Option<(usize, usize)>> = RwSignal::new(None);
 
+    // ── Table picker state ──────────────────────────────────────────────
+    let table_picker_open = RwSignal::new(false);
+    let table_picker_pos: RwSignal<Option<(f64, f64, bool)>> = RwSignal::new(None);
+    let table_hover: RwSignal<(usize, usize)> = RwSignal::new((1, 1));
+
     let slash_menu_items: Arc<Vec<SlashMenuItem>> = Arc::new(if show_slash_menu {
         let mut items = default_slash_menu_items();
         for (i, ext_item) in extension_toolbar_items.iter().enumerate() {
@@ -1495,6 +1500,13 @@ pub fn TreeWysiwygEditor(
             }
         }
 
+        // ── Table picker dismissal on Escape ──────────────────────────
+        if key == "Escape" && table_picker_pos.get_untracked().is_some() {
+            ev.prevent_default();
+            table_picker_pos.set(None);
+            return;
+        }
+
         // ── Slash menu trigger: "/" on empty block ──────────────────────
         if show_slash_menu && key == "/" && !ctrl && !shift && slash_item_count > 0
             && editor_ref.get_untracked().is_some() {
@@ -2038,9 +2050,10 @@ pub fn TreeWysiwygEditor(
             items
         });
 
+        let popover_triggers = ToolbarPopoverTriggers { link_popup_open, table_picker_open };
         let toolbar_views = render_toolbar_items(
             items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
-            link_popup_open,
+            popover_triggers,
         );
 
         Some(view! {
@@ -2055,9 +2068,10 @@ pub fn TreeWysiwygEditor(
     // ── Floating toolbar ────────────────────────────────────────────────
     let floating_toolbar_view = if show_floating_toolbar && !readonly {
         let items = floating_toolbar_items.unwrap_or_else(default_toolbar_items);
+        let popover_triggers = ToolbarPopoverTriggers { link_popup_open, table_picker_open };
         let toolbar_views = render_toolbar_items(
             items, &doc_state, &notify, editor_ref, formatting_state, extension_active_state,
-            link_popup_open,
+            popover_triggers,
         );
         Some(view! {
             <div class="kode-floating-toolbar"
@@ -2346,6 +2360,101 @@ pub fn TreeWysiwygEditor(
                             let _ = el.focus();
                         }
                     } />
+            </div>
+        }.into_any())
+    } else {
+        None
+    };
+
+    // ── Table picker popover view ──────────────────────────────────────
+    let table_picker_view = if !readonly {
+        // When toolbar Table button fires, compute position from selection.
+        {
+            Effect::new(move || {
+                if !table_picker_open.get() { return; }
+                table_picker_open.set(false);
+                table_hover.set((1, 1));
+
+                let Some(container) = editor_ref.get_untracked() else { return };
+                let container_el: &web_sys::Element = container.as_ref();
+                let Some(parent) = container_el.parent_element() else { return };
+                let parent_rect = parent.get_bounding_client_rect();
+
+                let Some(window) = web_sys::window() else { return };
+                let Some(sel) = window.get_selection().ok().flatten() else { return };
+                if sel.range_count() > 0 {
+                    if let Ok(range) = sel.get_range_at(0) {
+                        let rect = range.get_bounding_client_rect();
+                        if let Some(pos) = compute_position_relative(&rect, &parent_rect, 200.0) {
+                            floating_pos.set(None);
+                            table_picker_pos.set(Some((pos.top, pos.left, pos.flipped)));
+                        }
+                    }
+                }
+            });
+        }
+
+        let doc_pick = doc_state.clone();
+        let notify_pick = notify.clone();
+
+        Some(view! {
+            <div class="kode-table-picker"
+                style=move || {
+                    match table_picker_pos.get() {
+                        Some((top, left, flipped)) => {
+                            let transform = if flipped { "transform:translateY(-100%);" } else { "" };
+                            format!("display:block;top:{top}px;left:{left}px;{transform}")
+                        }
+                        None => "display:none;".to_string(),
+                    }
+                }
+                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                <div class="kode-table-picker-grid">
+                    {(0..6).map(|row| {
+                        view! {
+                            <div class="kode-table-picker-row">
+                                {(0..6).map(|col| {
+                                    let doc_cell = doc_pick.clone();
+                                    let notify_cell = notify_pick.clone();
+                                    view! {
+                                        <div
+                                            class=move || {
+                                                let (hc, hr) = table_hover.get();
+                                                if col < hc && row < hr {
+                                                    "kode-table-picker-cell selected"
+                                                } else {
+                                                    "kode-table-picker-cell"
+                                                }
+                                            }
+                                            on:mouseenter=move |_| {
+                                                table_hover.set((col + 1, row + 1));
+                                            }
+                                            on:click=move |_: MouseEvent| {
+                                                let (cols, rows) = table_hover.get_untracked();
+                                                let Ok(mut ds) = doc_cell.lock() else { return };
+                                                ds.insert_table(cols, rows);
+                                                let md = ds.to_markdown();
+                                                drop(ds);
+                                                (notify_cell)(Some(md));
+                                                table_picker_pos.set(None);
+                                                if let Some(el) = editor_ref.get_untracked() {
+                                                    let el: &web_sys::HtmlElement = el.as_ref();
+                                                    let _ = el.focus();
+                                                }
+                                            }
+                                        />
+                                    }
+                                }).collect::<Vec<_>>()}
+                            </div>
+                        }
+                    }).collect::<Vec<_>>()}
+                </div>
+                <div class="kode-table-picker-label">
+                    {move || {
+                        let (c, r) = table_hover.get();
+                        format!("{c} \u{00d7} {r}")
+                    }}
+                </div>
             </div>
         }.into_any())
     } else {
@@ -2665,6 +2774,10 @@ pub fn TreeWysiwygEditor(
                             link_popover_url.set(String::new());
                             link_popover_edit_range.set(None);
                         }
+                        // Close table picker on scroll.
+                        if table_picker_pos.get_untracked().is_some() {
+                            table_picker_pos.set(None);
+                        }
                         if slash_menu_state.get_untracked().is_none() { return; }
                         let trigger = slash_trigger_scroll.borrow();
                         if let Some(el) = trigger.as_ref() {
@@ -2686,6 +2799,7 @@ pub fn TreeWysiwygEditor(
 
             {floating_toolbar_view}
             {link_popover_view}
+            {table_picker_view}
             {slash_menu_view}
         </div>
     }
@@ -2731,6 +2845,14 @@ fn build_delete_request(node: &kode_doc::Node) -> DeleteAttachmentRequest {
     }
 }
 
+/// Trigger signals for toolbar popovers (link popover, table picker, etc.).
+/// Grouped into a struct to keep `render_toolbar_items` under the argument limit.
+#[derive(Clone, Copy)]
+struct ToolbarPopoverTriggers {
+    link_popup_open: RwSignal<bool>,
+    table_picker_open: RwSignal<bool>,
+}
+
 fn render_toolbar_items(
     items: Vec<ToolbarItem>,
     doc_state: &Arc<Mutex<DocState>>,
@@ -2738,7 +2860,7 @@ fn render_toolbar_items(
     editor_ref: NodeRef<leptos::html::Div>,
     formatting_state: RwSignal<FormattingState>,
     extension_active_state: RwSignal<Vec<(String, bool)>>,
-    link_popup_open: RwSignal<bool>,
+    popover_triggers: ToolbarPopoverTriggers,
 ) -> Vec<AnyView> {
     let mut views: Vec<AnyView> = Vec::new();
     for item in items {
@@ -2756,7 +2878,8 @@ fn render_toolbar_items(
                 let doc_tb = doc_state.clone();
                 let notify_tb = notify.clone();
                 let editor_ref_tb = editor_ref;
-                let link_popup_tb = link_popup_open;
+                let link_popup_tb = popover_triggers.link_popup_open;
+                let table_picker_tb = popover_triggers.table_picker_open;
                 let title = btn.title();
                 let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
                 let class = Signal::derive(move || {
@@ -2766,6 +2889,10 @@ fn render_toolbar_items(
                 let on_click = move |_: MouseEvent| {
                     if matches!(btn, BuiltinButton::Link) {
                         link_popup_tb.set(true);
+                        return;
+                    }
+                    if matches!(btn, BuiltinButton::Table) {
+                        table_picker_tb.set(true);
                         return;
                     }
                     let Ok(mut ds) = doc_tb.lock() else { return };
@@ -2798,7 +2925,8 @@ fn render_toolbar_items(
                 let doc_tb = doc_state.clone();
                 let notify_tb = notify.clone();
                 let editor_ref_tb = editor_ref;
-                let link_popup_tb = link_popup_open;
+                let link_popup_tb = popover_triggers.link_popup_open;
+                let table_picker_tb = popover_triggers.table_picker_open;
                 let title = btn.title();
                 let active = Signal::derive(move || btn.is_active(&formatting_state.get()));
                 let class = Signal::derive(move || {
@@ -2808,6 +2936,10 @@ fn render_toolbar_items(
                 let on_click = move |_: MouseEvent| {
                     if matches!(btn, BuiltinButton::Link) {
                         link_popup_tb.set(true);
+                        return;
+                    }
+                    if matches!(btn, BuiltinButton::Table) {
+                        table_picker_tb.set(true);
                         return;
                     }
                     let Ok(mut ds) = doc_tb.lock() else { return };
