@@ -3829,6 +3829,38 @@ mod table_editing_tests {
         assert_eq!(pipe_rows.len(), 2, "header + delimiter only for 1-row table, got: {md:?}");
     }
 
+    #[test]
+    fn table_delete_table_removes_entire_table() {
+        let mut state = DocState::from_markdown("Before\n\n| A | B |\n| --- | --- |\n| c | d |\n\nAfter");
+        // Place cursor inside a table cell.
+        let fmt = {
+            state.set_selection(Selection::cursor(10));
+            state.formatting_at_cursor()
+        };
+        assert!(fmt.in_table, "cursor should be in table");
+        state.delete_table();
+        let md = serialize_markdown(state.doc());
+        assert!(!md.contains('|'), "table should be removed, got: {md:?}");
+        assert!(md.contains("Before"), "text before table should remain");
+        assert!(md.contains("After"), "text after table should remain");
+    }
+
+    #[test]
+    fn formatting_at_cursor_in_table() {
+        let mut state = DocState::from_markdown("| A | B |\n| --- | --- |\n| c | d |");
+        state.set_selection(Selection::cursor(3));
+        let fmt = state.formatting_at_cursor();
+        assert!(fmt.in_table);
+    }
+
+    #[test]
+    fn formatting_at_cursor_not_in_table() {
+        let mut state = DocState::from_markdown("Hello world");
+        state.set_selection(Selection::cursor(3));
+        let fmt = state.formatting_at_cursor();
+        assert!(!fmt.in_table);
+    }
+
     // ── Row operation tests ───────────────────────────────────────────
 
     // Extended table: header + 2 data rows for row/column operation tests.

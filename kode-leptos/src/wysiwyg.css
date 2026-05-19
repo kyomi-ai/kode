@@ -953,6 +953,108 @@ body.kode-dragging * {
     font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 }
 
+/* ── Table Hover Controls ────────────────────────────────────────── */
+
+.kode-table-wrapper {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+}
+
+.kode-table-add-row-btn,
+.kode-table-add-col-btn {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--kode-table-control-bg, var(--kode-bg));
+    border: 1px solid var(--kode-table-control-border, var(--kode-border));
+    color: var(--kode-table-control-color, var(--kode-fg-dim));
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: 16px;
+    font-weight: 500;
+    user-select: none;
+    z-index: 5;
+}
+
+.kode-table-wrapper:hover > .kode-table-add-row-btn,
+.kode-table-wrapper:hover > .kode-table-add-col-btn,
+.kode-table-add-row-btn:hover,
+.kode-table-add-col-btn:hover {
+    opacity: 1;
+}
+
+.kode-table-add-row-btn:hover,
+.kode-table-add-col-btn:hover {
+    background: var(--kode-table-control-hover-bg, var(--kode-accent));
+    color: var(--kode-table-control-hover-color, var(--kode-bg));
+    border-color: var(--kode-table-control-hover-border, var(--kode-accent));
+}
+
+.kode-table-add-row-btn {
+    bottom: -14px;
+    left: 0;
+    right: 0;
+    height: 14px;
+    border-radius: 0 0 4px 4px;
+}
+
+.kode-table-add-col-btn {
+    top: 0;
+    bottom: 0;
+    right: -14px;
+    width: 14px;
+    border-radius: 0 4px 4px 0;
+}
+
+/* Hide table controls in readonly mode */
+.wysiwyg-readonly .kode-table-add-row-btn,
+.wysiwyg-readonly .kode-table-add-col-btn {
+    display: none;
+}
+
+/* ── Table Context Menu ──────────────────────────────────────────── */
+
+.kode-table-context-menu {
+    position: absolute;
+    z-index: 30;
+    min-width: 180px;
+    padding: var(--kode-ctx-menu-padding, 4px 0);
+    background: var(--kode-ctx-menu-bg, var(--kode-toolbar-bg, var(--kode-bg)));
+    border: 1px solid var(--kode-ctx-menu-border, var(--kode-border));
+    border-radius: var(--kode-ctx-menu-border-radius, 8px);
+    box-shadow: var(--kode-ctx-menu-shadow, 0 4px 16px rgba(0, 0, 0, 0.15));
+    font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    font-size: var(--kode-ctx-menu-font-size, 13px);
+    animation: kode-link-popover-in 0.1s ease-out;
+}
+
+.kode-ctx-menu-item {
+    padding: var(--kode-ctx-menu-item-padding, 6px 12px);
+    cursor: pointer;
+    color: var(--kode-ctx-menu-item-color, var(--kode-fg));
+}
+
+.kode-ctx-menu-item:hover {
+    background: var(--kode-ctx-menu-item-hover-bg, var(--kode-bg-hover));
+}
+
+.kode-ctx-menu-item.destructive {
+    color: var(--kode-ctx-menu-destructive-color, #dc2626);
+}
+
+.kode-ctx-menu-item.destructive:hover {
+    background: var(--kode-ctx-menu-destructive-hover-bg, rgba(220, 38, 38, 0.1));
+}
+
+.kode-ctx-menu-separator {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--kode-ctx-menu-separator-color, var(--kode-border));
+}
+
 /* ── Empty table cell placeholders ───────────────────────────────── */
 
 .wysiwyg-scroll-container th:empty::before {

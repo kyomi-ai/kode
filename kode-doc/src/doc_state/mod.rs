@@ -157,6 +157,8 @@ pub struct FormattingState {
     pub ordered_list: bool,
     /// Whether the cursor is inside a blockquote.
     pub blockquote: bool,
+    /// Whether the cursor is inside a table.
+    pub in_table: bool,
 }
 
 // ── HistoryEntry ───────────────────────────────────────────────────────────

@@ -188,6 +188,9 @@ pub fn TreeWysiwygEditor(
     let table_picker_pos: RwSignal<Option<(f64, f64, bool)>> = RwSignal::new(None);
     let table_hover: RwSignal<(usize, usize)> = RwSignal::new((1, 1));
 
+    // ── Table context menu state ────────────────────────────────────────
+    let table_ctx_menu_pos: RwSignal<Option<(f64, f64)>> = RwSignal::new(None);
+
     let slash_menu_items: Arc<Vec<SlashMenuItem>> = Arc::new(if show_slash_menu {
         let mut items = default_slash_menu_items();
         for (i, ext_item) in extension_toolbar_items.iter().enumerate() {
@@ -416,6 +419,11 @@ pub fn TreeWysiwygEditor(
                     can_drag_for_effect.as_deref(),
                 );
                 *old = new_segs;
+
+                // Mount table hover controls (add row/column buttons).
+                if !readonly {
+                    mount_table_controls_in_container(container_el);
+                }
 
                 // Reconnect the observer after patching.
                 if let Some(ref mo) = *mo_for_patch.borrow() {
@@ -1500,6 +1508,13 @@ pub fn TreeWysiwygEditor(
             }
         }
 
+        // ── Table context menu dismissal on Escape ─────────────────────
+        if key == "Escape" && table_ctx_menu_pos.get_untracked().is_some() {
+            ev.prevent_default();
+            table_ctx_menu_pos.set(None);
+            return;
+        }
+
         // ── Table picker dismissal on Escape ──────────────────────────
         if key == "Escape" && table_picker_pos.get_untracked().is_some() {
             ev.prevent_default();
@@ -2461,6 +2476,58 @@ pub fn TreeWysiwygEditor(
         None
     };
 
+    // ── Table context menu view ────────────────────────────────────────
+    let table_ctx_menu_view = if !readonly {
+        let make_ctx_handler = |op: fn(&mut DocState)| {
+            let doc = doc_state.clone();
+            let ntfy = notify.clone();
+            move |_: MouseEvent| {
+                let Ok(mut ds) = doc.lock() else { return };
+                op(&mut ds);
+                let md = ds.to_markdown();
+                drop(ds);
+                (ntfy)(Some(md));
+                table_ctx_menu_pos.set(None);
+                if let Some(el) = editor_ref.get_untracked() {
+                    let el: &web_sys::HtmlElement = el.as_ref();
+                    let _ = el.focus();
+                }
+            }
+        };
+
+        let on_insert_row_above = make_ctx_handler(DocState::insert_row_above);
+        let on_insert_row_below = make_ctx_handler(DocState::insert_row_below);
+        let on_insert_col_left = make_ctx_handler(DocState::insert_column_left);
+        let on_insert_col_right = make_ctx_handler(DocState::insert_column_right);
+        let on_delete_row = make_ctx_handler(DocState::delete_row);
+        let on_delete_col = make_ctx_handler(DocState::delete_column);
+        let on_delete_table = make_ctx_handler(DocState::delete_table);
+
+        Some(view! {
+            <div class="kode-table-context-menu"
+                style=move || {
+                    match table_ctx_menu_pos.get() {
+                        Some((top, left)) => format!("display:block;top:{top}px;left:{left}px;"),
+                        None => "display:none;".to_string(),
+                    }
+                }
+                on:mousedown=|ev: MouseEvent| { ev.prevent_default(); }>
+                <div class="kode-ctx-menu-item" on:click=on_insert_row_above>"Insert row above"</div>
+                <div class="kode-ctx-menu-item" on:click=on_insert_row_below>"Insert row below"</div>
+                <div class="kode-ctx-menu-separator" />
+                <div class="kode-ctx-menu-item" on:click=on_insert_col_left>"Insert column left"</div>
+                <div class="kode-ctx-menu-item" on:click=on_insert_col_right>"Insert column right"</div>
+                <div class="kode-ctx-menu-separator" />
+                <div class="kode-ctx-menu-item" on:click=on_delete_row>"Delete row"</div>
+                <div class="kode-ctx-menu-item" on:click=on_delete_col>"Delete column"</div>
+                <div class="kode-ctx-menu-separator" />
+                <div class="kode-ctx-menu-item destructive" on:click=on_delete_table>"Delete table"</div>
+            </div>
+        }.into_any())
+    } else {
+        None
+    };
+
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
     let on_mousedown = move |ev: MouseEvent| {
@@ -2468,10 +2535,13 @@ pub fn TreeWysiwygEditor(
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
         // Prevent focus loss when mousedown lands on the copy button,
-        // and prevent cursor placement when Ctrl/Cmd+clicking a link.
+        // table add controls, or cursor placement when Ctrl/Cmd+clicking a link.
         let mut walk = Some(target_el.clone());
         while let Some(ref current) = walk {
-            if current.class_list().contains("wysiwyg-code-copy") {
+            if current.class_list().contains("wysiwyg-code-copy")
+                || current.class_list().contains("kode-table-add-row-btn")
+                || current.class_list().contains("kode-table-add-col-btn")
+            {
                 ev.prevent_default();
                 return;
             }
@@ -2550,6 +2620,53 @@ pub fn TreeWysiwygEditor(
     // ── Render ───────────────────────────────────────────────────────────
     let theme_css = move || theme.get().syntax_css("pre.kode-content");
 
+    // ── Right-click context menu for tables ────────────────────────────
+    let doc_ctx = doc_state.clone();
+    let on_contextmenu = {
+        move |ev: MouseEvent| {
+            // Dismiss any existing menu first.
+            table_ctx_menu_pos.set(None);
+            if readonly { return; }
+            let Some(target) = ev.target() else { return };
+            let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+            let mut el = Some(target_el.clone());
+            let mut cell_el: Option<web_sys::Element> = None;
+            while let Some(ref current) = el {
+                if current.tag_name().eq_ignore_ascii_case("TD")
+                    || current.tag_name().eq_ignore_ascii_case("TH")
+                {
+                    cell_el = Some(current.clone());
+                    break;
+                }
+                if current.class_list().contains("wysiwyg-scroll-container") {
+                    break;
+                }
+                el = current.parent_element();
+            }
+            let Some(cell) = cell_el else { return };
+
+            ev.prevent_default();
+
+            // Sync DocState cursor to the right-clicked cell so operations
+            // target the correct row/column.
+            if let Some(pos_str) = cell.get_attribute("data-pos-start") {
+                if let Ok(pos) = pos_str.parse::<usize>() {
+                    if let Ok(mut ds) = doc_ctx.lock() {
+                        ds.set_selection(Selection::cursor(pos + 1));
+                    }
+                }
+            }
+
+            let Some(container) = editor_ref.get_untracked() else { return };
+            let container_el: &web_sys::Element = container.as_ref();
+            let Some(parent) = container_el.parent_element() else { return };
+            let parent_rect = parent.get_bounding_client_rect();
+            let top = ev.client_y() as f64 - parent_rect.top();
+            let left = ev.client_x() as f64 - parent_rect.left();
+            table_ctx_menu_pos.set(Some((top, left)));
+        }
+    };
+
     // Clone attachment callbacks + doc_state for the click handler closure.
     let on_delete_attachment_click = on_delete_attachment.clone();
     let on_click_attachment_click = on_click_attachment.clone();
@@ -2578,9 +2695,15 @@ pub fn TreeWysiwygEditor(
                 spellcheck="false"
                 on:keydown=on_keydown
                 on:mousedown=on_mousedown
+                on:contextmenu=on_contextmenu
                 on:click=move |ev: MouseEvent| {
                     let Some(target) = ev.target() else { return };
                     let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+
+                    // Dismiss table context menu on any click outside it.
+                    if table_ctx_menu_pos.get_untracked().is_some() {
+                        table_ctx_menu_pos.set(None);
+                    }
 
                     // Walk up from click target to identify the action.
                     let mut el = Some(target_el.clone());
@@ -2588,9 +2711,19 @@ pub fn TreeWysiwygEditor(
                     let mut delete_btn: Option<web_sys::Element> = None;
                     let mut attachment_block: Option<web_sys::Element> = None;
                     let mut link_el: Option<web_sys::Element> = None;
+                    let mut table_add_row: Option<web_sys::Element> = None;
+                    let mut table_add_col: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
                         if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("kode-table-add-row-btn") {
+                            table_add_row = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("kode-table-add-col-btn") {
+                            table_add_col = Some(current.clone());
                             break;
                         }
                         if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
@@ -2613,6 +2746,54 @@ pub fn TreeWysiwygEditor(
                             break;
                         }
                         el = current.parent_element();
+                    }
+
+                    // ── Table add-row button ────────────────────────────────
+                    if let Some(ref btn) = table_add_row {
+                        if readonly { return; }
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        // Button is a sibling of the table inside .kode-table-wrapper
+                        if let Some(wrapper) = btn.closest(".kode-table-wrapper").ok().flatten() {
+                            if let Some(table) = wrapper.query_selector("table.wysiwyg-table").ok().flatten() {
+                                if let Some(pos) = find_last_cell_pos(&table) {
+                                    let Ok(mut ds) = doc_state_click.lock() else { return };
+                                    ds.set_selection(Selection::cursor(pos));
+                                    ds.insert_row_below();
+                                    let md = ds.to_markdown();
+                                    drop(ds);
+                                    version.update(|v| *v += 1);
+                                    if let Some(ref cb) = on_change_click {
+                                        cb(md);
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+
+                    // ── Table add-column button ─────────────────────────────
+                    if let Some(ref btn) = table_add_col {
+                        if readonly { return; }
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        // Button is a sibling of the table inside .kode-table-wrapper
+                        if let Some(wrapper) = btn.closest(".kode-table-wrapper").ok().flatten() {
+                            if let Some(table) = wrapper.query_selector("table.wysiwyg-table").ok().flatten() {
+                                if let Some(pos) = find_last_cell_pos(&table) {
+                                    let Ok(mut ds) = doc_state_click.lock() else { return };
+                                    ds.set_selection(Selection::cursor(pos));
+                                    ds.insert_column_right();
+                                    let md = ds.to_markdown();
+                                    drop(ds);
+                                    version.update(|v| *v += 1);
+                                    if let Some(ref cb) = on_change_click {
+                                        cb(md);
+                                    }
+                                }
+                            }
+                        }
+                        return;
                     }
 
                     // ── Code copy button ────────────────────────────────────
@@ -2778,6 +2959,10 @@ pub fn TreeWysiwygEditor(
                         if table_picker_pos.get_untracked().is_some() {
                             table_picker_pos.set(None);
                         }
+                        // Close table context menu on scroll.
+                        if table_ctx_menu_pos.get_untracked().is_some() {
+                            table_ctx_menu_pos.set(None);
+                        }
                         if slash_menu_state.get_untracked().is_none() { return; }
                         let trigger = slash_trigger_scroll.borrow();
                         if let Some(el) = trigger.as_ref() {
@@ -2800,6 +2985,7 @@ pub fn TreeWysiwygEditor(
             {floating_toolbar_view}
             {link_popover_view}
             {table_picker_view}
+            {table_ctx_menu_view}
             {slash_menu_view}
         </div>
     }
@@ -3906,6 +4092,75 @@ fn mount_drag_handle_on_element(
 
 // mount_extension_views and mount_drag_handles removed —
 // replaced by patch_segments() which handles both inline.
+
+/// Mount hover "+" controls on a table element for adding rows and columns.
+///
+/// Wraps the table in a `kode-table-wrapper` div with `position: relative`,
+/// since `<div>` elements are not valid children of `<table>`. The buttons
+/// are appended as siblings of the table inside the wrapper.
+///
+/// Idempotent — skips if the wrapper is already present.
+#[cfg(target_arch = "wasm32")]
+fn mount_table_controls(table: &web_sys::Element) {
+    // Check if already wrapped.
+    if let Some(parent) = table.parent_element() {
+        if parent.class_list().contains("kode-table-wrapper") {
+            return;
+        }
+    }
+
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(parent) = table.parent_node() else { return };
+
+    // Create wrapper div — inherits contenteditable from the scroll container.
+    let Ok(wrapper) = doc.create_element("div") else { return };
+    let _ = wrapper.set_attribute("class", "kode-table-wrapper");
+
+    // Insert wrapper before the table, then move the table inside.
+    let _ = parent.insert_before(&wrapper, Some(table));
+    let _ = wrapper.append_child(table);
+
+    // "+" button below table (add row)
+    if let Ok(row_btn) = doc.create_element("div") {
+        let _ = row_btn.set_attribute("class", "kode-table-add-row-btn");
+        let _ = row_btn.set_attribute("contenteditable", "false");
+        row_btn.set_inner_html("+");
+        let _ = wrapper.append_child(&row_btn);
+    }
+
+    // "+" button right of table (add column)
+    if let Ok(col_btn) = doc.create_element("div") {
+        let _ = col_btn.set_attribute("class", "kode-table-add-col-btn");
+        let _ = col_btn.set_attribute("contenteditable", "false");
+        col_btn.set_inner_html("+");
+        let _ = wrapper.append_child(&col_btn);
+    }
+}
+
+/// Find a cursor position inside the last cell of a table element.
+/// Returns `data-pos-start` of the last `td` or `th` cell found in the DOM,
+/// which places the cursor at the beginning of that cell's content.
+fn find_last_cell_pos(table: &web_sys::Element) -> Option<usize> {
+    let cells = table.query_selector_all("td, th").ok()?;
+    let count = cells.length();
+    if count == 0 { return None; }
+    let last_cell: web_sys::Element = cells.item(count - 1)?.unchecked_into();
+    last_cell.get_attribute("data-pos-start")?.parse::<usize>().ok()
+}
+
+/// Mount table controls on all table elements within a container.
+#[cfg(target_arch = "wasm32")]
+fn mount_table_controls_in_container(container: &web_sys::Element) {
+    if let Ok(tables) = container.query_selector_all("table.wysiwyg-table") {
+        for i in 0..tables.length() {
+            if let Some(table) = tables.item(i) {
+                if let Some(el) = table.dyn_ref::<web_sys::Element>() {
+                    mount_table_controls(el);
+                }
+            }
+        }
+    }
+}
 
 /// Walk up from `el` to find the direct child of `container`.
 /// Returns `None` if `el` is not a descendant of `container`.
