@@ -1429,6 +1429,55 @@ pub fn TreeWysiwygEditor(
         });
     }
 
+    // ── Task checkbox click handler ────────────────────────────────────
+    // Detect clicks on `.kode-checkbox` elements inside task lists and
+    // toggle the corresponding ListItem's checked attribute.
+    if !readonly {
+        let doc_checkbox = doc_state.clone();
+        let notify_checkbox = notify.clone();
+
+        let checkbox_cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |ev: web_sys::Event| {
+            let Some(target) = ev.target() else { return };
+            let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
+            if !target_el.class_list().contains("kode-checkbox") {
+                return;
+            }
+            ev.prevent_default();
+            ev.stop_propagation();
+
+            let Some(pos_str) = target_el.get_attribute("data-task-pos") else { return };
+            let Ok(pos) = pos_str.parse::<usize>() else { return };
+
+            let Ok(mut ds) = doc_checkbox.lock() else { return };
+            ds.toggle_task_item_checked(pos);
+            let md = ds.to_markdown();
+            drop(ds);
+            (notify_checkbox)(Some(md));
+        });
+
+        let checkbox_closure = std::cell::RefCell::new(Some(checkbox_cb));
+        let editor_checkbox = editor_ref;
+
+        Effect::new(move |_| {
+            let Some(el) = editor_checkbox.get_untracked() else { return };
+            let Some(cb) = checkbox_closure.borrow_mut().take() else {
+                return; // Already attached.
+            };
+
+            let target: &web_sys::EventTarget = el.as_ref();
+            let _ = target.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+
+            let cb_fn: js_sys::Function = cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+            let cb_wrap = send_wrapper::SendWrapper::new(cb);
+
+            let cleanup_el: web_sys::EventTarget = target.clone();
+            on_cleanup(move || {
+                let _ = cleanup_el.remove_event_listener_with_callback("click", &cb_fn);
+                drop(cb_wrap);
+            });
+        });
+    }
+
     // ── Keydown ──────────────────────────────────────────────────────────
     let doc_key = doc_state.clone();
     let notify_key = notify.clone();

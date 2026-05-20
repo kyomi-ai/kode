@@ -161,7 +161,7 @@ pub(crate) fn render_block_node(
 
         // ── Bullet list ──────────────────────────────────────────────
         NodeType::BulletList => {
-            let items = render_list_items(&node.content, content_start, extensions, language_aliases);
+            let items = render_list_items(&node.content, content_start, extensions, language_aliases, false);
             Some(
                 view! {
                     <ul class="wysiwyg-list wysiwyg-bullet-list"
@@ -180,7 +180,7 @@ pub(crate) fn render_block_node(
                 Some(AttrValue::Int(n)) => *n as i32,
                 _ => 1,
             };
-            let items = render_list_items(&node.content, content_start, extensions, language_aliases);
+            let items = render_list_items(&node.content, content_start, extensions, language_aliases, false);
             Some(
                 view! {
                     <ol class="wysiwyg-list wysiwyg-ordered-list"
@@ -189,6 +189,21 @@ pub(crate) fn render_block_node(
                         data-pos-end=content_end>
                         {items}
                     </ol>
+                }
+                .into_any(),
+            )
+        }
+
+        // ── Task list ───────────────────────────────────────────────
+        NodeType::TaskList => {
+            let items = render_list_items(&node.content, content_start, extensions, language_aliases, true);
+            Some(
+                view! {
+                    <ul class="wysiwyg-list wysiwyg-task-list"
+                        data-pos-start=content_start
+                        data-pos-end=content_end>
+                        {items}
+                    </ul>
                 }
                 .into_any(),
             )
@@ -427,11 +442,16 @@ pub(crate) fn render_block_node(
 // ── List rendering ───────────────────────────────────────────────────────
 
 /// Render list item children from a list's content fragment.
+///
+/// When `is_task_list` is true, each list item renders a checkbox before
+/// its content. The checkbox carries `data-task-pos` with the ListItem's
+/// open-token position so the click handler can toggle checked state.
 fn render_list_items(
     content: &Fragment,
     content_start: usize,
     extensions: &[Arc<dyn Extension>],
     language_aliases: &[(String, String)],
+    is_task_list: bool,
 ) -> Vec<AnyView> {
     let mut items = Vec::new();
     let mut pos = content_start;
@@ -447,16 +467,56 @@ fn render_list_items(
             let item_content_start = pos + 1;
             let item_content_end = item_content_start + child.content.size();
             let children = render_list_item_content(child, item_content_start, extensions, language_aliases);
-            items.push(
-                view! {
-                    <li class="wysiwyg-list-item"
-                        data-pos-start=item_content_start
-                        data-pos-end=item_content_end>
-                        {children}
-                    </li>
-                }
-                .into_any(),
-            );
+
+            if is_task_list {
+                let checked = matches!(
+                    get_attr(&child.attrs, "checked"),
+                    Some(AttrValue::Bool(true))
+                );
+                let checkbox_class = if checked {
+                    "kode-checkbox kode-checkbox-checked"
+                } else {
+                    "kode-checkbox"
+                };
+                let li_class = "kode-checklist-item";
+                let task_pos = pos.to_string();
+                // Build the checkbox as raw HTML so we can set the `checked`
+                // attribute conditionally without Leptos's controlled input
+                // behavior interfering.
+                let checkbox_html = if checked {
+                    format!(
+                        r#"<input type="checkbox" class="{}" contenteditable="false" data-task-pos="{}" checked />"#,
+                        checkbox_class, task_pos
+                    )
+                } else {
+                    format!(
+                        r#"<input type="checkbox" class="{}" contenteditable="false" data-task-pos="{}" />"#,
+                        checkbox_class, task_pos
+                    )
+                };
+                items.push(
+                    view! {
+                        <li class=li_class
+                            data-pos-start=item_content_start
+                            data-pos-end=item_content_end>
+                            <span inner_html=checkbox_html />
+                            {children}
+                        </li>
+                    }
+                    .into_any(),
+                );
+            } else {
+                items.push(
+                    view! {
+                        <li class="wysiwyg-list-item"
+                            data-pos-start=item_content_start
+                            data-pos-end=item_content_end>
+                            {children}
+                        </li>
+                    }
+                    .into_any(),
+                );
+            }
         }
         pos += child.node_size();
     }
@@ -979,7 +1039,7 @@ fn block_node_to_html(
                 "<ul class=\"wysiwyg-list wysiwyg-bullet-list\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
                 content_start, content_end
             ));
-            list_items_to_html(html, &node.content, content_start, extensions, language_aliases);
+            list_items_to_html(html, &node.content, content_start, extensions, language_aliases, false);
             html.push_str("</ul>");
         }
 
@@ -993,8 +1053,18 @@ fn block_node_to_html(
                 "<ol class=\"wysiwyg-list wysiwyg-ordered-list\" start=\"{}\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
                 start_num, content_start, content_end
             ));
-            list_items_to_html(html, &node.content, content_start, extensions, language_aliases);
+            list_items_to_html(html, &node.content, content_start, extensions, language_aliases, false);
             html.push_str("</ol>");
+        }
+
+        // ── Task list ───────────────────────────────────────────────
+        NodeType::TaskList => {
+            html.push_str(&format!(
+                "<ul class=\"wysiwyg-list wysiwyg-task-list\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                content_start, content_end
+            ));
+            list_items_to_html(html, &node.content, content_start, extensions, language_aliases, true);
+            html.push_str("</ul>");
         }
 
         // ── Code block ──────────────────────────────────────────────
@@ -1194,12 +1264,16 @@ fn block_children_to_html(
 }
 
 /// Render list items to HTML.
+///
+/// When `is_task_list` is true, each list item renders a checkbox before
+/// its content, matching the Leptos view renderer.
 fn list_items_to_html(
     html: &mut String,
     content: &Fragment,
     content_start: usize,
     extensions: &[Arc<dyn Extension>],
     language_aliases: &[(String, String)],
+    is_task_list: bool,
 ) {
     let mut pos = content_start;
     for child in content.iter() {
@@ -1207,10 +1281,32 @@ fn list_items_to_html(
             let item_content_start = pos + 1;
             let item_content_end = item_content_start + child.content.size();
             let children_html = list_item_content_to_html(child, item_content_start, extensions, language_aliases);
-            html.push_str(&format!(
-                "<li class=\"wysiwyg-list-item\" data-pos-start=\"{}\" data-pos-end=\"{}\">{}</li>",
-                item_content_start, item_content_end, children_html
-            ));
+
+            if is_task_list {
+                let checked = matches!(
+                    get_attr(&child.attrs, "checked"),
+                    Some(AttrValue::Bool(true))
+                );
+                let checkbox_class = if checked {
+                    "kode-checkbox kode-checkbox-checked"
+                } else {
+                    "kode-checkbox"
+                };
+                let checked_attr = if checked { " checked" } else { "" };
+                html.push_str(&format!(
+                    "<li class=\"kode-checklist-item\" data-pos-start=\"{}\" data-pos-end=\"{}\">\
+                     <input type=\"checkbox\" class=\"{}\" contenteditable=\"false\" data-task-pos=\"{}\"{} />\
+                     {}</li>",
+                    item_content_start, item_content_end,
+                    checkbox_class, pos, checked_attr,
+                    children_html
+                ));
+            } else {
+                html.push_str(&format!(
+                    "<li class=\"wysiwyg-list-item\" data-pos-start=\"{}\" data-pos-end=\"{}\">{}</li>",
+                    item_content_start, item_content_end, children_html
+                ));
+            }
         }
         pos += child.node_size();
     }

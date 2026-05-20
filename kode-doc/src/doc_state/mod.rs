@@ -155,6 +155,8 @@ pub struct FormattingState {
     pub bullet_list: bool,
     /// Whether the cursor is inside an ordered list item.
     pub ordered_list: bool,
+    /// Whether the cursor is inside a task list item.
+    pub task_list: bool,
     /// Whether the cursor is inside a blockquote.
     pub blockquote: bool,
     /// Whether the cursor is inside a table.
