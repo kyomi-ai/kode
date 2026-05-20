@@ -598,4 +598,131 @@ impl DocState {
             self.redo_stack.clear();
         }
     }
+
+    /// Check if typing a space at the current cursor would complete a markdown
+    /// list marker at the start of the current text block, and if so convert
+    /// the block into the corresponding list.
+    ///
+    /// Returns `true` if a conversion was performed (caller should
+    /// `preventDefault` the space), `false` otherwise.
+    ///
+    /// Recognized markers:
+    /// - `"-"` or `"*"` at position 0 of a textblock → bullet list
+    /// - Digits followed by `"."` (e.g. `"1."`, `"12."`) → ordered list
+    ///   with the parsed start number
+    pub fn try_auto_convert_list_on_space(&mut self) -> bool {
+        use crate::attrs::ordered_list_attrs;
+
+        let head = self.selection.head;
+        let resolved = self.doc.resolve(head);
+
+        // Must be inside a textblock.
+        let parent = resolved.parent();
+        if !parent.node_type.is_textblock() {
+            return false;
+        }
+
+        let block_start = resolved.start(resolved.depth);
+        let cursor_in_block = head - block_start;
+
+        // Upper bound: no valid marker is longer than 10 chars, and must be
+        // at least 1 char.
+        if cursor_in_block == 0 || cursor_in_block > 10 {
+            return false;
+        }
+
+        // Get text content before the cursor within this block.
+        let text_before: String = parent
+            .text_content()
+            .chars()
+            .take(cursor_in_block)
+            .collect();
+
+        // Determine what list type the marker maps to.
+        let (target_type, target_attrs) = if text_before == "-" || text_before == "*" {
+            (NodeType::BulletList, Attrs::new())
+        } else if text_before.ends_with('.') {
+            let digits = &text_before[..text_before.len() - 1];
+            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                let start_num: i64 = digits.parse().unwrap_or(1);
+                (NodeType::OrderedList, ordered_list_attrs(start_num))
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        // Walk ancestors to see if we're already inside a list.
+        let mut existing_list_depth = None;
+        let mut existing_list_type = None;
+        for d in (1..=resolved.depth).rev() {
+            let nt = resolved.node(d).node_type;
+            if nt == NodeType::BulletList || nt == NodeType::OrderedList {
+                existing_list_depth = Some(d);
+                existing_list_type = Some(nt);
+                break;
+            }
+        }
+
+        // If already inside the same list type, don't convert (no-op).
+        if existing_list_type == Some(target_type) {
+            return false;
+        }
+
+        // ── Perform both transforms on scratch docs, commit only on success ──
+
+        // Step 1: Delete the marker text from the paragraph.
+        let delete_from = block_start;
+        let delete_to = block_start + cursor_in_block;
+        let mut tr = Transform::new(self.doc.clone());
+        if tr.delete(delete_from, delete_to).is_err() {
+            return false;
+        }
+        let after_delete = tr.doc;
+        let new_head = head - cursor_in_block;
+
+        // Step 2: Wrap in list or change list type on the post-delete doc.
+        let (final_doc, final_selection) = match existing_list_depth {
+            Some(depth) => {
+                let re_resolved = after_delete.resolve(new_head);
+                let list_node = re_resolved.node(depth);
+                let list_start = re_resolved.before(depth);
+                let list_end = re_resolved.after(depth);
+                let new_list = Node::branch_with_attrs(
+                    target_type,
+                    target_attrs,
+                    list_node.content.clone(),
+                );
+                let mut tr2 = Transform::new(after_delete);
+                if tr2
+                    .replace(
+                        list_start,
+                        list_end,
+                        Slice::new(Fragment::from_node(new_list), 0, 0),
+                    )
+                    .is_err()
+                {
+                    return false;
+                }
+                (tr2.doc, Selection::cursor(new_head))
+            }
+            None => {
+                let mut tr2 = Transform::new(after_delete);
+                if tr2.wrap_in_list(new_head, new_head, target_type, target_attrs).is_err() {
+                    return false;
+                }
+                let wrapped_head = new_head + 2;
+                let max = tr2.doc.content.size();
+                (tr2.doc, Selection::cursor(wrapped_head.min(max)))
+            }
+        };
+
+        // Both transforms succeeded — commit atomically.
+        self.push_undo();
+        self.doc = final_doc;
+        self.selection = final_selection;
+        self.redo_stack.clear();
+        true
+    }
 }
