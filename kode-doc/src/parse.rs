@@ -9,7 +9,7 @@ use arborium_tree_sitter::{Language, Parser};
 
 use crate::attrs::{
     code_block_attrs, empty_attrs, heading_attrs, image_attrs, image_block_attrs, link_attrs,
-    ordered_list_attrs, table_cell_attrs,
+    ordered_list_attrs, table_cell_attrs, task_item_attrs,
 };
 use crate::fragment::Fragment;
 use crate::mark::{Mark, MarkType};
@@ -213,13 +213,18 @@ fn convert_block_node(
                 })
                 .unwrap_or(false);
 
-            let items = convert_list_items(node, source, config);
+            let (items, all_task_items) = convert_list_items(node, source, config);
 
             if is_ordered {
                 let start = detect_ordered_list_start(node, source);
                 Some(Node::branch_with_attrs(
                     NodeType::OrderedList,
                     ordered_list_attrs(start),
+                    Fragment::from_vec(items),
+                ))
+            } else if all_task_items {
+                Some(Node::branch(
+                    NodeType::TaskList,
                     Fragment::from_vec(items),
                 ))
             } else {
@@ -309,7 +314,8 @@ fn convert_block_node(
         // Skip structural nodes that are handled by their parents
         "list_item" | "block_continuation" | "block_quote_marker"
         | "list_marker_minus" | "list_marker_plus" | "list_marker_star"
-        | "list_marker_dot" | "list_marker_parenthesis" => None,
+        | "list_marker_dot" | "list_marker_parenthesis"
+        | "task_list_marker_unchecked" | "task_list_marker_checked" => None,
 
         // Front matter: skip
         "minus_metadata" | "plus_metadata" => None,
@@ -334,24 +340,59 @@ fn convert_block_node(
 }
 
 /// Convert list_item children of a list node.
+///
+/// Returns `(items, all_task_items)` where `all_task_items` is true when every
+/// list item has a task list marker (`[ ]` or `[x]`).
 fn convert_list_items(
     list_node: &arborium_tree_sitter::Node,
     source: &str,
     config: &MarkdownConfig,
-) -> Vec<Node> {
+) -> (Vec<Node>, bool) {
     let mut items = Vec::new();
     let mut cursor = list_node.walk();
+    let mut all_task_items = true;
+    let mut has_items = false;
 
     for child in list_node.named_children(&mut cursor) {
         if child.kind() == "list_item" {
+            has_items = true;
+            let task_checked = detect_task_marker(&child);
             let block_children = convert_block_children(&child, source, config);
-            items.push(Node::branch(
-                NodeType::ListItem,
-                Fragment::from_vec(block_children),
-            ));
+
+            if let Some(checked) = task_checked {
+                items.push(Node::branch_with_attrs(
+                    NodeType::ListItem,
+                    task_item_attrs(checked),
+                    Fragment::from_vec(block_children),
+                ));
+            } else {
+                all_task_items = false;
+                items.push(Node::branch(
+                    NodeType::ListItem,
+                    Fragment::from_vec(block_children),
+                ));
+            }
         }
     }
-    items
+    (items, has_items && all_task_items)
+}
+
+/// Check if a list_item has a task list marker child.
+///
+/// Tree-sitter produces `task_list_marker_unchecked` for `[ ]` and
+/// `task_list_marker_checked` for `[x]` as direct children of `list_item`.
+/// Returns `Some(true)` for checked, `Some(false)` for unchecked, `None` if
+/// no task marker is present.
+fn detect_task_marker(list_item: &arborium_tree_sitter::Node) -> Option<bool> {
+    let mut cursor = list_item.walk();
+    for child in list_item.children(&mut cursor) {
+        match child.kind() {
+            "task_list_marker_checked" => return Some(true),
+            "task_list_marker_unchecked" => return Some(false),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse column alignments from a pipe_table_delimiter_row.
@@ -2093,5 +2134,145 @@ mod file_block_tests {
             &config,
         );
         assert_eq!(doc.child(0).node_type, NodeType::FileBlock);
+    }
+}
+
+#[cfg(test)]
+mod task_list_tests {
+    use super::*;
+    use crate::attrs::{get_attr, AttrValue};
+
+    #[test]
+    fn parse_unchecked_task_list() {
+        let doc = parse_markdown("- [ ] task one\n- [ ] task two");
+        assert_eq!(doc.child_count(), 1);
+
+        let list = doc.child(0);
+        assert_eq!(list.node_type, NodeType::TaskList);
+        assert_eq!(list.child_count(), 2);
+
+        // First item: checked=false
+        let item1 = list.child(0);
+        assert_eq!(item1.node_type, NodeType::ListItem);
+        assert_eq!(
+            get_attr(&item1.attrs, "checked"),
+            Some(&AttrValue::Bool(false))
+        );
+        assert_eq!(item1.text_content(), "task one");
+
+        // Second item: checked=false
+        let item2 = list.child(1);
+        assert_eq!(
+            get_attr(&item2.attrs, "checked"),
+            Some(&AttrValue::Bool(false))
+        );
+        assert_eq!(item2.text_content(), "task two");
+    }
+
+    #[test]
+    fn parse_checked_task_list() {
+        let doc = parse_markdown("- [x] done task");
+        assert_eq!(doc.child_count(), 1);
+
+        let list = doc.child(0);
+        assert_eq!(list.node_type, NodeType::TaskList);
+        assert_eq!(list.child_count(), 1);
+
+        let item = list.child(0);
+        assert_eq!(
+            get_attr(&item.attrs, "checked"),
+            Some(&AttrValue::Bool(true))
+        );
+        assert_eq!(item.text_content(), "done task");
+    }
+
+    #[test]
+    fn parse_mixed_checked_unchecked() {
+        let doc = parse_markdown("- [ ] todo\n- [x] done");
+        assert_eq!(doc.child_count(), 1);
+
+        let list = doc.child(0);
+        assert_eq!(list.node_type, NodeType::TaskList);
+        assert_eq!(list.child_count(), 2);
+
+        assert_eq!(
+            get_attr(&list.child(0).attrs, "checked"),
+            Some(&AttrValue::Bool(false))
+        );
+        assert_eq!(
+            get_attr(&list.child(1).attrs, "checked"),
+            Some(&AttrValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn regular_bullet_list_stays_bullet_list() {
+        let doc = parse_markdown("- item one\n- item two");
+        assert_eq!(doc.child_count(), 1);
+        assert_eq!(doc.child(0).node_type, NodeType::BulletList);
+    }
+
+    #[test]
+    fn task_list_round_trip() {
+        let input = "- [ ] first\n- [x] second";
+        let doc = parse_markdown(input);
+        let output = crate::serialize::serialize_markdown(&doc);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn task_list_round_trip_all_unchecked() {
+        let input = "- [ ] alpha\n- [ ] beta\n- [ ] gamma";
+        let doc = parse_markdown(input);
+        let output = crate::serialize::serialize_markdown(&doc);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn task_list_round_trip_all_checked() {
+        let input = "- [x] done one\n- [x] done two";
+        let doc = parse_markdown(input);
+        let output = crate::serialize::serialize_markdown(&doc);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn task_list_among_other_blocks() {
+        let doc = parse_markdown("# Title\n\n- [ ] task\n\nSome text");
+        assert_eq!(doc.child_count(), 3);
+        assert_eq!(doc.child(0).node_type, NodeType::Heading);
+        assert_eq!(doc.child(1).node_type, NodeType::TaskList);
+        assert_eq!(doc.child(2).node_type, NodeType::Paragraph);
+    }
+
+    #[test]
+    fn task_list_text_is_clean() {
+        // The paragraph text should not contain the [ ] / [x] prefix
+        let doc = parse_markdown("- [ ] clean text\n- [x] also clean");
+        let list = doc.child(0);
+        assert_eq!(list.child(0).text_content(), "clean text");
+        assert_eq!(list.child(1).text_content(), "also clean");
+    }
+
+    #[test]
+    fn task_list_parse_serialize_parse_identical() {
+        let input = "- [ ] todo\n- [x] done\n- [ ] maybe";
+        let tree1 = parse_markdown(input);
+        let serialized = crate::serialize::serialize_markdown(&tree1);
+        let tree2 = parse_markdown(&serialized);
+
+        assert_eq!(
+            tree1.text_content(),
+            tree2.text_content(),
+            "text_content mismatch"
+        );
+        assert_eq!(tree1.child(0).node_type, NodeType::TaskList);
+        assert_eq!(tree2.child(0).node_type, NodeType::TaskList);
+    }
+
+    #[test]
+    fn single_task_item_is_task_list() {
+        let doc = parse_markdown("- [ ] only one");
+        assert_eq!(doc.child(0).node_type, NodeType::TaskList);
     }
 }

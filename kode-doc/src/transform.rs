@@ -362,6 +362,7 @@ impl Transform {
         to: usize,
         list_type: NodeType,
         attrs: Attrs,
+        item_attrs: Attrs,
     ) -> Result<&mut Self, String> {
         let res_from = self.doc.resolve(from);
         let res_to = self.doc.resolve(to);
@@ -385,8 +386,9 @@ impl Transform {
         // Wrap each top-level child in a ListItem.
         let mut list_items = Vec::new();
         for child in content_slice.content.iter() {
-            let li = Node::branch(
+            let li = Node::branch_with_attrs(
                 NodeType::ListItem,
+                item_attrs.clone(),
                 Fragment::from_node(child.clone()),
             );
             list_items.push(li);
@@ -855,7 +857,7 @@ mod tests {
         // Expected: <doc><ul><li><p>Hello</p></li><li><p>World</p></li></ul></doc>
         let doc = two_para_doc();
         let mut tr = Transform::new(doc);
-        tr.wrap_in_list(1, 10, NodeType::BulletList, Attrs::new())
+        tr.wrap_in_list(1, 10, NodeType::BulletList, Attrs::new(), Attrs::new())
             .unwrap();
 
         assert_eq!(tr.doc.child_count(), 1);

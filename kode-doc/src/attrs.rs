@@ -62,6 +62,13 @@ pub fn image_attrs(src: &str, alt: &str, title: Option<&str>) -> Attrs {
     attrs
 }
 
+/// Returns attributes for a task list item with the given checked state.
+pub fn task_item_attrs(checked: bool) -> Attrs {
+    let mut attrs = SmallVec::new();
+    attrs.push(("checked".to_string(), AttrValue::Bool(checked)));
+    attrs
+}
+
 /// Returns attributes for an ordered list node with the given start number.
 pub fn ordered_list_attrs(start: i64) -> Attrs {
     let mut attrs = SmallVec::new();
@@ -198,6 +205,14 @@ mod tests {
             get_attr(&attrs, "title"),
             Some(&AttrValue::String("Title".to_string()))
         );
+    }
+
+    #[test]
+    fn task_item_attrs_stores_checked() {
+        let attrs = task_item_attrs(false);
+        assert_eq!(get_attr(&attrs, "checked"), Some(&AttrValue::Bool(false)));
+        let attrs = task_item_attrs(true);
+        assert_eq!(get_attr(&attrs, "checked"), Some(&AttrValue::Bool(true)));
     }
 
     #[test]

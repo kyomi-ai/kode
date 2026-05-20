@@ -25,7 +25,7 @@ pub mod slice;
 pub mod step;
 pub mod transform;
 
-pub use attrs::{file_block_attrs, image_block_attrs, AttrValue, Attrs};
+pub use attrs::{file_block_attrs, image_block_attrs, task_item_attrs, AttrValue, Attrs};
 pub use doc_state::{DocState, FormattingState, GapSide, Selection};
 pub use fragment::Fragment;
 pub use mark::{Mark, MarkType};

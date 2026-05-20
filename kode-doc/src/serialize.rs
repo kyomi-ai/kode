@@ -64,6 +64,9 @@ fn serialize_node(node: &Node, out: &mut String, ctx: &BlockContext) {
         NodeType::OrderedList => {
             serialize_ordered_list(node, out);
         }
+        NodeType::TaskList => {
+            serialize_task_list(node, out);
+        }
         NodeType::ListItem => {
             // ListItem should be handled by the list serializers.
             // If encountered directly, serialize its block children.
@@ -339,6 +342,22 @@ fn serialize_ordered_list(node: &Node, out: &mut String) {
         let indent = " ".repeat(marker.len());
         let mut item_buf = String::new();
         serialize_list_item_content(item, &mut item_buf, &marker, &indent);
+        out.push_str(&item_buf);
+    }
+}
+
+/// Serialize a task list.
+fn serialize_task_list(node: &Node, out: &mut String) {
+    let items = node.content.children();
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let checked = matches!(get_attr(&item.attrs, "checked"), Some(AttrValue::Bool(true)));
+        let marker = if checked { "- [x] " } else { "- [ ] " };
+        // Indent is 6 spaces to match the 6-character marker "- [x] ".
+        let mut item_buf = String::new();
+        serialize_list_item_content(item, &mut item_buf, marker, "      ");
         out.push_str(&item_buf);
     }
 }
@@ -1698,5 +1717,78 @@ mod tests {
             serialize_markdown(&d),
             "Before\n\n[doc.pdf](/files/doc.pdf)\n\nAfter"
         );
+    }
+
+    // ── Task list serialization tests ─────────────────────────────
+
+    #[test]
+    fn serialize_task_list_simple() {
+        let task_list = Node::branch(
+            NodeType::TaskList,
+            Fragment::from_vec(vec![
+                Node::branch_with_attrs(
+                    NodeType::ListItem,
+                    crate::attrs::task_item_attrs(false),
+                    Fragment::from_node(para(vec![text("todo")])),
+                ),
+                Node::branch_with_attrs(
+                    NodeType::ListItem,
+                    crate::attrs::task_item_attrs(true),
+                    Fragment::from_node(para(vec![text("done")])),
+                ),
+            ]),
+        );
+        let d = doc(vec![task_list]);
+        assert_eq!(serialize_markdown(&d), "- [ ] todo\n- [x] done");
+    }
+
+    #[test]
+    fn serialize_task_list_all_unchecked() {
+        let task_list = Node::branch(
+            NodeType::TaskList,
+            Fragment::from_vec(vec![
+                Node::branch_with_attrs(
+                    NodeType::ListItem,
+                    crate::attrs::task_item_attrs(false),
+                    Fragment::from_node(para(vec![text("a")])),
+                ),
+                Node::branch_with_attrs(
+                    NodeType::ListItem,
+                    crate::attrs::task_item_attrs(false),
+                    Fragment::from_node(para(vec![text("b")])),
+                ),
+            ]),
+        );
+        let d = doc(vec![task_list]);
+        assert_eq!(serialize_markdown(&d), "- [ ] a\n- [ ] b");
+    }
+
+    #[test]
+    fn serialize_task_list_among_blocks() {
+        let task_list = Node::branch(
+            NodeType::TaskList,
+            Fragment::from_vec(vec![Node::branch_with_attrs(
+                NodeType::ListItem,
+                crate::attrs::task_item_attrs(false),
+                Fragment::from_node(para(vec![text("task")])),
+            )]),
+        );
+        let d = doc(vec![
+            para(vec![text("Before")]),
+            task_list,
+            para(vec![text("After")]),
+        ]);
+        assert_eq!(
+            serialize_markdown(&d),
+            "Before\n\n- [ ] task\n\nAfter"
+        );
+    }
+
+    #[test]
+    fn round_trip_task_list() {
+        let input = "- [ ] first\n- [x] second\n- [ ] third";
+        let tree = parse_markdown(input);
+        let output = serialize_markdown(&tree);
+        assert_eq!(output, input);
     }
 }

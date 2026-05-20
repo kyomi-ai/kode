@@ -124,17 +124,28 @@ impl DocState {
     /// Toggle bullet list: wrap in list if not in one, lift from list if
     /// already in a bullet list, or change list type if in an ordered list.
     pub fn toggle_bullet_list(&mut self) {
-        self.toggle_list(NodeType::BulletList, Attrs::new());
+        self.toggle_list(NodeType::BulletList, Attrs::new(), Attrs::new());
     }
 
     /// Toggle ordered list: same pattern as bullet list but for ordered.
     pub fn toggle_ordered_list(&mut self) {
         use crate::attrs::ordered_list_attrs;
-        self.toggle_list(NodeType::OrderedList, ordered_list_attrs(1));
+        self.toggle_list(NodeType::OrderedList, ordered_list_attrs(1), Attrs::new());
+    }
+
+    /// Toggle task list: wrap in task list if not in one, lift out if
+    /// already in a task list, or convert list type if in another list.
+    pub fn toggle_task_list(&mut self) {
+        use crate::attrs::task_item_attrs;
+        self.toggle_list(NodeType::TaskList, Attrs::new(), task_item_attrs(false));
     }
 
     /// Shared logic for toggling between list types.
-    fn toggle_list(&mut self, target_list_type: NodeType, attrs: Attrs) {
+    ///
+    /// `item_attrs` are applied to each `ListItem` when wrapping from
+    /// scratch or converting from another list type. For task lists this
+    /// carries `checked: false`; for bullet/ordered lists it is empty.
+    fn toggle_list(&mut self, target_list_type: NodeType, attrs: Attrs, item_attrs: Attrs) {
         let from = self.selection.from();
         let to = self.selection.to();
         let resolved = self.doc.resolve(from);
@@ -144,7 +155,10 @@ impl DocState {
         let mut current_list_type = None;
         for d in (1..=resolved.depth).rev() {
             let nt = resolved.node(d).node_type;
-            if nt == NodeType::BulletList || nt == NodeType::OrderedList {
+            if nt == NodeType::BulletList
+                || nt == NodeType::OrderedList
+                || nt == NodeType::TaskList
+            {
                 current_list_depth = Some(d);
                 current_list_type = Some(nt);
                 break;
@@ -242,15 +256,32 @@ impl DocState {
             }
             (Some(depth), Some(_other_list_type)) => {
                 // In a different list type — change the list type.
-                // Replace the list node with one of the target type, keeping children.
+                // Replace the list node with one of the target type,
+                // re-wrapping each child ListItem with the target item_attrs.
                 self.push_undo();
                 let list_node = resolved.node(depth);
                 let list_start = resolved.before(depth);
                 let list_end = resolved.after(depth);
+
+                // Re-wrap children with the target item attrs (e.g. add
+                // `checked: false` when converting to TaskList, or strip
+                // `checked` when converting away from TaskList).
+                let new_children: Vec<Node> = list_node
+                    .content
+                    .iter()
+                    .map(|child| {
+                        Node::branch_with_attrs(
+                            NodeType::ListItem,
+                            item_attrs.clone(),
+                            child.content.clone(),
+                        )
+                    })
+                    .collect();
+
                 let new_list = Node::branch_with_attrs(
                     target_list_type,
                     attrs,
-                    list_node.content.clone(),
+                    Fragment::from_vec(new_children),
                 );
                 let mut tr = Transform::new(self.doc.clone());
                 if tr
@@ -270,7 +301,10 @@ impl DocState {
                 // Not in any list — wrap in the target list type.
                 self.push_undo();
                 let mut tr = Transform::new(self.doc.clone());
-                if tr.wrap_in_list(from, to, target_list_type, attrs).is_ok() {
+                if tr
+                    .wrap_in_list(from, to, target_list_type, attrs, item_attrs)
+                    .is_ok()
+                {
                     // wrap_in_list adds 2 wrapper tokens (list open + list item open).
                     let new_anchor = self.selection.anchor + 2;
                     let new_head = self.selection.head + 2;
@@ -281,6 +315,57 @@ impl DocState {
                     self.redo_stack.clear();
                 }
             }
+        }
+    }
+
+    /// Toggle the checked state of a task list item at the given position.
+    ///
+    /// `pos` is the position of the ListItem's open token in the document.
+    /// This is called from the UI when a checkbox is clicked.
+    pub fn toggle_task_item_checked(&mut self, pos: usize) {
+        use crate::attrs::{get_attr, task_item_attrs, AttrValue};
+
+        // Resolve inside the ListItem (pos + 1 is the content start).
+        let resolved = self.doc.resolve(pos + 1);
+
+        // Walk up to find the ListItem depth.
+        let mut item_depth = None;
+        for d in (1..=resolved.depth).rev() {
+            if resolved.node(d).node_type == NodeType::ListItem {
+                item_depth = Some(d);
+                break;
+            }
+        }
+        let Some(depth) = item_depth else { return };
+
+        let item_node = resolved.node(depth);
+        let item_start = resolved.before(depth);
+        let item_end = resolved.after(depth);
+
+        let currently_checked = matches!(
+            get_attr(&item_node.attrs, "checked"),
+            Some(AttrValue::Bool(true))
+        );
+        let new_attrs = task_item_attrs(!currently_checked);
+
+        let new_item = Node::branch_with_attrs(
+            NodeType::ListItem,
+            new_attrs,
+            item_node.content.clone(),
+        );
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr
+            .replace(
+                item_start,
+                item_end,
+                Slice::new(Fragment::from_node(new_item), 0, 0),
+            )
+            .is_ok()
+        {
+            self.doc = tr.doc;
+            self.redo_stack.clear();
         }
     }
 
@@ -610,8 +695,10 @@ impl DocState {
     /// - `"-"` or `"*"` at position 0 of a textblock → bullet list
     /// - Digits followed by `"."` (e.g. `"1."`, `"12."`) → ordered list
     ///   with the parsed start number
+    /// - `"[]"` at position 0 of a textblock → task list (unchecked)
+    /// - `"[x]"` at position 0 of a textblock → task list (checked)
     pub fn try_auto_convert_list_on_space(&mut self) -> bool {
-        use crate::attrs::ordered_list_attrs;
+        use crate::attrs::{ordered_list_attrs, task_item_attrs};
 
         let head = self.selection.head;
         let resolved = self.doc.resolve(head);
@@ -639,26 +726,40 @@ impl DocState {
             .collect();
 
         // Determine what list type the marker maps to.
-        let (target_type, target_attrs) = if text_before == "-" || text_before == "*" {
-            (NodeType::BulletList, Attrs::new())
-        } else if text_before.ends_with('.') {
-            let digits = &text_before[..text_before.len() - 1];
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-                let start_num: i64 = digits.parse().unwrap_or(1);
-                (NodeType::OrderedList, ordered_list_attrs(start_num))
+        // `target_item_attrs` carries per-item attributes (e.g. checked state
+        // for task lists).
+        let (target_type, target_attrs, target_item_attrs) =
+            if text_before == "-" || text_before == "*" {
+                (NodeType::BulletList, Attrs::new(), Attrs::new())
+            } else if text_before == "[]" {
+                (NodeType::TaskList, Attrs::new(), task_item_attrs(false))
+            } else if text_before == "[x]" {
+                (NodeType::TaskList, Attrs::new(), task_item_attrs(true))
+            } else if text_before.ends_with('.') {
+                let digits = &text_before[..text_before.len() - 1];
+                if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                    let start_num: i64 = digits.parse().unwrap_or(1);
+                    (
+                        NodeType::OrderedList,
+                        ordered_list_attrs(start_num),
+                        Attrs::new(),
+                    )
+                } else {
+                    return false;
+                }
             } else {
                 return false;
-            }
-        } else {
-            return false;
-        };
+            };
 
         // Walk ancestors to see if we're already inside a list.
         let mut existing_list_depth = None;
         let mut existing_list_type = None;
         for d in (1..=resolved.depth).rev() {
             let nt = resolved.node(d).node_type;
-            if nt == NodeType::BulletList || nt == NodeType::OrderedList {
+            if nt == NodeType::BulletList
+                || nt == NodeType::OrderedList
+                || nt == NodeType::TaskList
+            {
                 existing_list_depth = Some(d);
                 existing_list_type = Some(nt);
                 break;
@@ -689,10 +790,24 @@ impl DocState {
                 let list_node = re_resolved.node(depth);
                 let list_start = re_resolved.before(depth);
                 let list_end = re_resolved.after(depth);
+
+                // Re-wrap children with the target item attrs.
+                let new_children: Vec<Node> = list_node
+                    .content
+                    .iter()
+                    .map(|child| {
+                        Node::branch_with_attrs(
+                            NodeType::ListItem,
+                            target_item_attrs.clone(),
+                            child.content.clone(),
+                        )
+                    })
+                    .collect();
+
                 let new_list = Node::branch_with_attrs(
                     target_type,
                     target_attrs,
-                    list_node.content.clone(),
+                    Fragment::from_vec(new_children),
                 );
                 let mut tr2 = Transform::new(after_delete);
                 if tr2
@@ -709,7 +824,16 @@ impl DocState {
             }
             None => {
                 let mut tr2 = Transform::new(after_delete);
-                if tr2.wrap_in_list(new_head, new_head, target_type, target_attrs).is_err() {
+                if tr2
+                    .wrap_in_list(
+                        new_head,
+                        new_head,
+                        target_type,
+                        target_attrs,
+                        target_item_attrs,
+                    )
+                    .is_err()
+                {
                     return false;
                 }
                 let wrapped_head = new_head + 2;

@@ -19,6 +19,8 @@ pub enum NodeType {
     BulletList,
     /// An ordered list (start number in attrs).
     OrderedList,
+    /// A task/checklist list (checkbox items, checked state in ListItem attrs).
+    TaskList,
     /// A single list item.
     ListItem,
     /// A fenced code block (language in attrs).
@@ -60,6 +62,7 @@ impl NodeType {
                 | NodeType::Blockquote
                 | NodeType::BulletList
                 | NodeType::OrderedList
+                | NodeType::TaskList
                 | NodeType::ListItem
                 | NodeType::CodeBlock
                 | NodeType::HorizontalRule
@@ -129,6 +132,7 @@ mod tests {
         assert!(NodeType::Blockquote.is_block());
         assert!(NodeType::BulletList.is_block());
         assert!(NodeType::OrderedList.is_block());
+        assert!(NodeType::TaskList.is_block());
         assert!(NodeType::ListItem.is_block());
         assert!(NodeType::CodeBlock.is_block());
         assert!(NodeType::HorizontalRule.is_block());
@@ -203,6 +207,7 @@ mod tests {
             NodeType::Blockquote,
             NodeType::BulletList,
             NodeType::OrderedList,
+            NodeType::TaskList,
             NodeType::ListItem,
             NodeType::CodeBlock,
             NodeType::HorizontalRule,
@@ -244,7 +249,9 @@ pub fn can_contain(parent: NodeType, child: NodeType) -> bool {
         NodeType::Doc => child.is_block(),
         NodeType::Paragraph | NodeType::Heading => child.is_inline(),
         NodeType::Blockquote => child.is_block(),
-        NodeType::BulletList | NodeType::OrderedList => child == NodeType::ListItem,
+        NodeType::BulletList | NodeType::OrderedList | NodeType::TaskList => {
+            child == NodeType::ListItem
+        }
         NodeType::ListItem => child.is_block(),
         NodeType::CodeBlock => child == NodeType::Text,
         NodeType::Table => matches!(child, NodeType::TableHeader | NodeType::TableRow),
@@ -279,7 +286,9 @@ mod validation_tests {
     fn lists_contain_items() {
         assert!(can_contain(NodeType::BulletList, NodeType::ListItem));
         assert!(can_contain(NodeType::OrderedList, NodeType::ListItem));
+        assert!(can_contain(NodeType::TaskList, NodeType::ListItem));
         assert!(!can_contain(NodeType::BulletList, NodeType::Paragraph));
+        assert!(!can_contain(NodeType::TaskList, NodeType::Paragraph));
     }
 
     #[test]

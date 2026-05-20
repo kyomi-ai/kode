@@ -156,6 +156,7 @@ impl DocState {
                 }
                 crate::node_type::NodeType::BulletList => state.bullet_list = true,
                 crate::node_type::NodeType::OrderedList => state.ordered_list = true,
+                crate::node_type::NodeType::TaskList => state.task_list = true,
                 crate::node_type::NodeType::Blockquote => state.blockquote = true,
                 crate::node_type::NodeType::Table => state.in_table = true,
                 _ => {}

@@ -4275,4 +4275,195 @@ mod auto_convert_list_tests {
         ds.insert_text(".");
         assert!(!ds.try_auto_convert_list_on_space());
     }
+
+    // ── Auto-convert: [] → task list ─────────────────────────────────
+
+    #[test]
+    fn auto_convert_brackets_to_task_list() {
+        let mut ds = DocState::from_markdown("task");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::TaskList));
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("[ ] task") || md.contains("- [ ] task"),
+            "expected task list markdown, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn auto_convert_checked_brackets_to_task_list() {
+        let mut ds = DocState::from_markdown("done");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("[x]");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::TaskList));
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("[x] done"),
+            "expected checked task list markdown, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn auto_convert_brackets_from_bullet_to_task() {
+        let mut ds = DocState::from_markdown("- stuff");
+        // Inside bullet list. Type "[]" at start of paragraph content.
+        // Positions: 0=<ul>, 1=<li>, 2=<p>, 3=s, ...
+        ds.set_selection(Selection::cursor(3));
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::TaskList));
+        assert!(!ds.is_in_node(NodeType::BulletList));
+    }
+
+    #[test]
+    fn auto_convert_noop_already_task_list() {
+        let mut ds = DocState::from_markdown("- [ ] existing");
+        assert!(ds.is_in_node(NodeType::TaskList));
+        // Type "[]" at start of the task item text.
+        // Positions: 0=<tl>, 1=<li>, 2=<p>, 3=e, ...
+        ds.set_selection(Selection::cursor(3));
+        ds.insert_text("[]");
+        assert!(!ds.try_auto_convert_list_on_space());
+    }
+}
+
+mod task_list_tests {
+    use crate::doc_state::*;
+    use crate::node_type::NodeType;
+
+    // ── Task list: toggle on/off ─────────────────────────────────────
+
+    #[test]
+    fn toggle_task_list_on_from_paragraph() {
+        let mut ds = DocState::from_markdown("Hello");
+        ds.set_selection(Selection::cursor(3));
+
+        ds.toggle_task_list();
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        // Content preserved.
+        let tl = ds.doc.child(0);
+        assert_eq!(tl.node_type, NodeType::TaskList);
+        assert_eq!(tl.child_count(), 1);
+        assert_eq!(tl.child(0).child(0).text_content(), "Hello");
+
+        // ListItem should have checked: false attr.
+        let item = tl.child(0);
+        assert_eq!(
+            crate::attrs::get_attr(&item.attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn toggle_task_list_off_from_task_list() {
+        let mut ds = DocState::from_markdown("- [ ] hello");
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        ds.toggle_task_list();
+        assert!(!ds.is_in_node(NodeType::TaskList));
+        assert!(!ds.is_in_node(NodeType::BulletList));
+        // Should be a plain paragraph now.
+        assert_eq!(ds.doc.child(0).node_type, NodeType::Paragraph);
+        assert_eq!(ds.doc.child(0).text_content(), "hello");
+    }
+
+    #[test]
+    fn toggle_task_list_from_bullet_list() {
+        let mut ds = DocState::from_markdown("- item");
+        assert!(ds.is_in_node(NodeType::BulletList));
+
+        ds.toggle_task_list();
+        assert!(ds.is_in_node(NodeType::TaskList));
+        assert!(!ds.is_in_node(NodeType::BulletList));
+
+        // Items should have checked: false attr.
+        let tl = ds.doc.child(0);
+        let item = tl.child(0);
+        assert_eq!(
+            crate::attrs::get_attr(&item.attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn toggle_bullet_list_from_task_list() {
+        let mut ds = DocState::from_markdown("- [x] done");
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        ds.toggle_bullet_list();
+        assert!(ds.is_in_node(NodeType::BulletList));
+        assert!(!ds.is_in_node(NodeType::TaskList));
+
+        // ListItem should NOT have checked attr (stripped).
+        let bl = ds.doc.child(0);
+        let item = bl.child(0);
+        assert!(item.attrs.is_empty());
+    }
+
+    // ── Task list: toggle checked state ──────────────────────────────
+
+    #[test]
+    fn toggle_task_item_checked() {
+        let mut ds = DocState::from_markdown("- [ ] unchecked\n- [x] checked");
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        // Structure: Doc > TaskList > ListItem(checked=false) > Paragraph
+        //                           > ListItem(checked=true) > Paragraph
+        // Positions: 0=<tl>, 1=<li>, 2=<p>, 3=u...
+        let tl = ds.doc.child(0);
+        assert_eq!(tl.child_count(), 2);
+
+        // First item is unchecked.
+        assert_eq!(
+            crate::attrs::get_attr(&tl.child(0).attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(false))
+        );
+        // Second item is checked.
+        assert_eq!(
+            crate::attrs::get_attr(&tl.child(1).attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(true))
+        );
+
+        // Toggle first item (pos=1 is the ListItem open token).
+        ds.toggle_task_item_checked(1);
+
+        // Now first item should be checked.
+        let tl = ds.doc.child(0);
+        assert_eq!(
+            crate::attrs::get_attr(&tl.child(0).attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(true))
+        );
+
+        // Markdown should reflect the change.
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("[x] unchecked"),
+            "expected first item checked, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn toggle_task_item_checked_is_undoable() {
+        let mut ds = DocState::from_markdown("- [ ] task");
+        ds.toggle_task_item_checked(1);
+
+        // Should be checked now.
+        let tl = ds.doc.child(0);
+        assert_eq!(
+            crate::attrs::get_attr(&tl.child(0).attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(true))
+        );
+
+        // Undo should restore unchecked.
+        assert!(ds.undo());
+        let tl = ds.doc.child(0);
+        assert_eq!(
+            crate::attrs::get_attr(&tl.child(0).attrs, "checked"),
+            Some(&crate::attrs::AttrValue::Bool(false))
+        );
+    }
 }
