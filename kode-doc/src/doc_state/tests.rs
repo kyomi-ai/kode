@@ -4103,3 +4103,176 @@ mod table_editing_tests {
         );
     }
 }
+
+mod auto_convert_list_tests {
+    use crate::doc_state::*;
+    use crate::node_type::NodeType;
+
+    // ── Dash → bullet list ────────────────────────────────────────────
+
+    #[test]
+    fn auto_convert_dash_to_bullet_list() {
+        // Create a paragraph, insert "-" at the start, then try convert.
+        // from_markdown("test") → Doc > Paragraph > "test"
+        // Positions: 0=<p>, 1=t, 2=e, 3=s, 4=t, 5=</p>
+        let mut ds = DocState::from_markdown("test");
+        ds.set_selection(Selection::cursor(1)); // start of paragraph
+        ds.insert_text("-");
+        // Now paragraph text is "-test", cursor is at 2 (after "-").
+        assert!(ds.try_auto_convert_list_on_space());
+        // Should now be a bullet list containing "test".
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("- test") || md.trim() == "- test",
+            "expected bullet list markdown, got: {md:?}"
+        );
+        assert!(ds.is_in_node(NodeType::BulletList));
+    }
+
+    // ── Asterisk → bullet list ────────────────────────────────────────
+
+    #[test]
+    fn auto_convert_asterisk_to_bullet_list() {
+        let mut ds = DocState::from_markdown("hello");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("*");
+        assert!(ds.try_auto_convert_list_on_space());
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("- hello") || md.contains("* hello"),
+            "expected bullet list markdown, got: {md:?}"
+        );
+        assert!(ds.is_in_node(NodeType::BulletList));
+    }
+
+    // ── "1." → ordered list ───────────────────────────────────────────
+
+    #[test]
+    fn auto_convert_1dot_to_ordered_list() {
+        let mut ds = DocState::from_markdown("item");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("1.");
+        assert!(ds.try_auto_convert_list_on_space());
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("1. item"),
+            "expected ordered list markdown, got: {md:?}"
+        );
+        assert!(ds.is_in_node(NodeType::OrderedList));
+    }
+
+    // ── Higher start number → ordered list ────────────────────────────
+
+    #[test]
+    fn auto_convert_ordered_with_higher_number() {
+        let mut ds = DocState::from_markdown("third");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("3.");
+        assert!(ds.try_auto_convert_list_on_space());
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("3. third"),
+            "expected ordered list with start=3, got: {md:?}"
+        );
+        assert!(ds.is_in_node(NodeType::OrderedList));
+    }
+
+    // ── No-op: same list type ────────────────────────────────────────
+
+    #[test]
+    fn auto_convert_noop_already_bullet_list() {
+        // Create a bullet list, then type "-" at the start of the item.
+        let mut ds = DocState::from_markdown("- existing");
+        // Structure: Doc > BulletList > ListItem > Paragraph > "existing"
+        // Positions: 0=<ul>, 1=<li>, 2=<p>, 3=e, ...
+        ds.set_selection(Selection::cursor(3));
+        ds.insert_text("-");
+        // Now text is "-existing", cursor after "-". Already in a BulletList.
+        assert!(!ds.try_auto_convert_list_on_space());
+    }
+
+    // ── No-op: marker not at block start ─────────────────────────────
+
+    #[test]
+    fn auto_convert_noop_mid_text() {
+        // Paragraph "a-" with cursor after "-" — dash is not at position 0.
+        let mut ds = DocState::from_markdown("atest");
+        ds.set_selection(Selection::cursor(2)); // after "a"
+        ds.insert_text("-");
+        // Now text is "a-test", cursor at 3 (after "-"). text_before = "a-".
+        assert!(!ds.try_auto_convert_list_on_space());
+    }
+
+    // ── Change list type: bullet → ordered ───────────────────────────
+
+    #[test]
+    fn auto_convert_changes_bullet_to_ordered() {
+        let mut ds = DocState::from_markdown("- stuff");
+        // Inside bullet list. Type "1." at start of paragraph content.
+        // Positions: 0=<ul>, 1=<li>, 2=<p>, 3=s, ...
+        ds.set_selection(Selection::cursor(3));
+        ds.insert_text("1.");
+        // Now paragraph text is "1.stuff", cursor after "1.".
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::OrderedList));
+        assert!(!ds.is_in_node(NodeType::BulletList));
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("stuff"),
+            "content should be preserved, got: {md:?}"
+        );
+    }
+
+    // ── Undo restores original state ─────────────────────────────────
+
+    #[test]
+    fn auto_convert_is_undoable() {
+        let mut ds = DocState::from_markdown("test");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("-");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::BulletList));
+
+        // Undo the auto-convert (one undo entry).
+        assert!(ds.undo());
+        // Should be back to paragraph with "-test".
+        assert!(!ds.is_in_node(NodeType::BulletList));
+    }
+
+    // ── Empty paragraph: just the marker ─────────────────────────────
+
+    #[test]
+    fn auto_convert_dash_empty_paragraph() {
+        // Start with empty paragraph, type "-".
+        let mut ds = DocState::from_markdown("");
+        ds.insert_text("-");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::BulletList));
+        let md = ds.to_markdown();
+        // Should be an empty bullet list item.
+        assert!(
+            md.contains("- ") || md.contains("-\n") || md.trim() == "-",
+            "expected empty bullet list, got: {md:?}"
+        );
+    }
+
+    // ── Invalid markers should not convert ───────────────────────────
+
+    #[test]
+    fn auto_convert_noop_invalid_marker() {
+        // "+" is not a recognized list marker.
+        let mut ds = DocState::from_markdown("test");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("+");
+        assert!(!ds.try_auto_convert_list_on_space());
+    }
+
+    #[test]
+    fn auto_convert_noop_just_dot() {
+        // "." alone (no digits before it) should not convert.
+        let mut ds = DocState::from_markdown("test");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text(".");
+        assert!(!ds.try_auto_convert_list_on_space());
+    }
+}

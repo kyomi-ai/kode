@@ -534,6 +534,18 @@ pub fn TreeWysiwygEditor(
                     return;
                 }
 
+                // Auto-convert list syntax: detect "- ", "* ", "1. " at block start.
+                if let Some(data) = input_ev.data() {
+                    if data.starts_with(' ') && ds.try_auto_convert_list_on_space() {
+                        input_ev.prevent_default();
+                        let md = ds.to_markdown();
+                        drop(ds);
+                        kd_handled_input.set(true);
+                        (notify_input)(Some(md));
+                        return;
+                    }
+                }
+
                 // Let the browser handle text insertion natively. The
                 // MutationObserver will diff the DOM change and sync it
                 // back to DocState. Don't modify DocState here — the MO
