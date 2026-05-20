@@ -2920,34 +2920,26 @@ pub fn TreeWysiwygEditor(
                                     }
                                 } else if !readonly {
                                     // Plain click on link — open popover in edit mode.
-                                    // Don't prevent default: let the browser move the cursor so
-                                    // selectionchange syncs the DocState position. Defer the popover
-                                    // opening via setTimeout(0) so the cursor is synced first.
-                                    let link_el_c = a_el.clone();
-                                    let ds_c = doc_state_click.clone();
-                                    let Some(window) = web_sys::window() else { return };
-                                    let cb = Closure::once(move || {
-                                        if let Ok(ds) = ds_c.lock() {
-                                            if let Some((link_href, from, to)) = ds.link_at_cursor() {
-                                                drop(ds);
-                                                let link_rect = link_el_c.get_bounding_client_rect();
-                                                let Some(container) = editor_ref.get_untracked() else { return };
-                                                let container_el: &web_sys::Element = container.as_ref();
-                                                let Some(parent) = container_el.parent_element() else { return };
-                                                let parent_rect = parent.get_bounding_client_rect();
-                                                if let Some(pos) = compute_position_relative(&link_rect, &parent_rect, 60.0) {
-                                                    link_popover_url.set(link_href);
-                                                    link_popover_edit_range.set(Some((from, to)));
-                                                    floating_pos.set(None);
-                                                    link_popover_pos.set(Some((pos.top, pos.left, pos.flipped)));
-                                                }
-                                            }
-                                        }
-                                    });
-                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                        cb.as_ref().unchecked_ref(), 0
-                                    );
-                                    cb.forget();
+                                    // Explicitly sync the DOM selection to DocState here
+                                    // (selectionchange may not have fired yet), then use
+                                    // link_at_cursor() for the full contiguous link range.
+                                    let link_rect = a_el.get_bounding_client_rect();
+                                    let Some(container) = editor_ref.get_untracked() else { return };
+                                    let container_el: &web_sys::Element = container.as_ref();
+                                    let Some(parent) = container_el.parent_element() else { return };
+                                    let parent_rect = parent.get_bounding_client_rect();
+                                    let edit_range = if let Ok(mut ds) = doc_state_click.lock() {
+                                        sync_selection_to_doc(&mut ds, container_el);
+                                        ds.link_at_cursor().map(|(_, from, to)| (from, to))
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(pos) = compute_position_relative(&link_rect, &parent_rect, 60.0) {
+                                        link_popover_url.set(href);
+                                        link_popover_edit_range.set(edit_range);
+                                        floating_pos.set(None);
+                                        link_popover_pos.set(Some((pos.top, pos.left, pos.flipped)));
+                                    }
                                 }
                             }
                         }
