@@ -291,11 +291,13 @@
     margin: var(--kode-checklist-item-margin, 0.25em 0);
 }
 
-/* Unwrap the Leptos <span> wrapper so the <input> becomes a direct
- * flex child without introducing an extra box. The drag handle is a
- * <div>, so this only targets the Leptos wrapper. */
-.kode-checklist-item > span {
+.kode-checklist-item > span:not([data-pos-start]) {
     display: contents;
+}
+
+.kode-checklist-item > span[data-pos-start] {
+    flex: 1;
+    min-width: 0;
 }
 
 .kode-checkbox {
