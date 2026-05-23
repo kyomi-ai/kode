@@ -1142,9 +1142,107 @@ body.kode-dragging * {
     border-color: var(--kode-table-control-hover-border, var(--kode-accent));
 }
 
-/* Hide table insert handles in readonly mode */
+/* ── Column header strips (select column) ──────────────────────── */
+
+.kode-table-col-header {
+    position: absolute;
+    height: 12px;
+    cursor: pointer;
+    background: transparent;
+    border-radius: 3px 3px 0 0;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+    z-index: 4;
+    user-select: none;
+}
+
+.kode-table-wrapper:hover .kode-table-col-header {
+    opacity: 1;
+    background: var(--kode-table-header-strip-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.1));
+}
+
+.kode-table-col-header:hover {
+    background: var(--kode-table-header-strip-hover-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.25)) !important;
+}
+
+.kode-table-col-header.kode-col-header-active {
+    opacity: 1;
+    background: var(--kode-table-selection-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.2));
+}
+
+/* ── Row selection handles ─────────────────────────────────────── */
+
+.kode-table-row-handle {
+    position: absolute;
+    left: -16px;
+    width: 12px;
+    cursor: pointer;
+    background: transparent;
+    border-radius: 3px 0 0 3px;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+    z-index: 4;
+    user-select: none;
+}
+
+.kode-table-wrapper:hover .kode-table-row-handle {
+    opacity: 1;
+    background: var(--kode-table-header-strip-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.1));
+}
+
+.kode-table-row-handle:hover {
+    background: var(--kode-table-header-strip-hover-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.25)) !important;
+}
+
+.kode-table-row-handle.kode-row-handle-active {
+    opacity: 1;
+    background: var(--kode-table-selection-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.2));
+}
+
+/* ── Selection highlights ──────────────────────────────────────── */
+
+td.kode-col-selected,
+th.kode-col-selected {
+    background: var(--kode-table-selection-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.08));
+}
+
+tr.kode-row-selected {
+    background: var(--kode-table-selection-bg, rgba(var(--kode-accent-rgb, 59, 130, 246), 0.08));
+}
+
+/* ── Selection delete button ───────────────────────────────────── */
+
+.kode-table-selection-delete {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--kode-table-delete-bg, #dc2626);
+    color: var(--kode-table-delete-color, #fff);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    user-select: none;
+    transition: background 0.15s, transform 0.15s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.kode-table-selection-delete:hover {
+    background: var(--kode-table-delete-hover-bg, #b91c1c);
+    transform: scale(1.1);
+}
+
+/* Hide table insert handles, column headers, row handles in readonly mode */
 .wysiwyg-readonly .kode-table-row-insert,
-.wysiwyg-readonly .kode-table-col-insert {
+.wysiwyg-readonly .kode-table-col-insert,
+.wysiwyg-readonly .kode-table-col-header,
+.wysiwyg-readonly .kode-table-row-handle,
+.wysiwyg-readonly .kode-table-selection-delete {
     display: none;
 }
 

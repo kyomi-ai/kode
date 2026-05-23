@@ -2737,6 +2737,9 @@ pub fn TreeWysiwygEditor(
             if current.class_list().contains("wysiwyg-code-copy")
                 || current.class_list().contains("kode-table-row-insert")
                 || current.class_list().contains("kode-table-col-insert")
+                || current.class_list().contains("kode-table-col-header")
+                || current.class_list().contains("kode-table-row-handle")
+                || current.class_list().contains("kode-table-selection-delete")
             {
                 ev.prevent_default();
                 return;
@@ -2909,6 +2912,9 @@ pub fn TreeWysiwygEditor(
                     let mut link_el: Option<web_sys::Element> = None;
                     let mut table_row_insert: Option<web_sys::Element> = None;
                     let mut table_col_insert: Option<web_sys::Element> = None;
+                    let mut table_col_header: Option<web_sys::Element> = None;
+                    let mut table_row_handle: Option<web_sys::Element> = None;
+                    let mut table_sel_delete: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
                         if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
@@ -2920,6 +2926,18 @@ pub fn TreeWysiwygEditor(
                         }
                         if current.class_list().contains("kode-table-col-insert") {
                             table_col_insert = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("kode-table-col-header") {
+                            table_col_header = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("kode-table-row-handle") {
+                            table_row_handle = Some(current.clone());
+                            break;
+                        }
+                        if current.class_list().contains("kode-table-selection-delete") {
+                            table_sel_delete = Some(current.clone());
                             break;
                         }
                         if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
@@ -2991,6 +3009,152 @@ pub fn TreeWysiwygEditor(
                             }
                         }
                         return;
+                    }
+
+                    // ── Table selection delete button ──────────────────────
+                    if let Some(ref del_btn) = table_sel_delete {
+                        if readonly { return; }
+                        ev.prevent_default();
+                        ev.stop_propagation();
+
+                        // Find the wrapper to read selection state.
+                        let wrapper = find_ancestor_by_class(del_btn, "kode-table-wrapper");
+                        let Some(ref wrapper) = wrapper else { return };
+
+                        let sel_col = wrapper.get_attribute("data-selected-col");
+                        let sel_row = wrapper.get_attribute("data-selected-row");
+
+                        if sel_col.is_some() {
+                            // Delete the selected column.
+                            if let Some(pos_str) = del_btn.get_attribute("data-cell-pos") {
+                                if let Ok(pos) = pos_str.parse::<usize>() {
+                                    let Ok(mut ds) = doc_state_click.lock() else { return };
+                                    ds.set_selection(Selection::cursor(pos));
+                                    ds.delete_column();
+                                    let md = ds.to_markdown();
+                                    drop(ds);
+                                    clear_table_selection_highlights(wrapper);
+                                    version.update(|v| *v += 1);
+                                    if let Some(ref cb) = on_change_click {
+                                        cb(md);
+                                    }
+                                }
+                            }
+                        } else if sel_row.is_some() {
+                            // Delete the selected row.
+                            if let Some(pos_str) = del_btn.get_attribute("data-cell-pos") {
+                                if let Ok(pos) = pos_str.parse::<usize>() {
+                                    let Ok(mut ds) = doc_state_click.lock() else { return };
+                                    ds.set_selection(Selection::cursor(pos));
+                                    ds.delete_row();
+                                    let md = ds.to_markdown();
+                                    drop(ds);
+                                    clear_table_selection_highlights(wrapper);
+                                    version.update(|v| *v += 1);
+                                    if let Some(ref cb) = on_change_click {
+                                        cb(md);
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+
+                    // ── Table column header click (select column) ──────────
+                    if let Some(ref header) = table_col_header {
+                        if readonly { return; }
+                        ev.prevent_default();
+                        ev.stop_propagation();
+
+                        let wrapper = find_ancestor_by_class(header, "kode-table-wrapper");
+                        let Some(ref wrapper) = wrapper else { return };
+                        let Some(col_index_str) = header.get_attribute("data-col-index") else { return };
+                        let Some(cell_pos_str) = header.get_attribute("data-cell-pos") else { return };
+
+                        // Clear any previous selection.
+                        let _ = wrapper.remove_attribute("data-selected-row");
+                        clear_table_selection_highlights(wrapper);
+
+                        // Set column selection.
+                        let _ = wrapper.set_attribute("data-selected-col", &col_index_str);
+                        let _ = header.class_list().add_1("kode-col-header-active");
+
+                        // Highlight all cells in this column.
+                        let Ok(col_index) = col_index_str.parse::<usize>() else { return };
+                        highlight_column(wrapper, col_index);
+
+                        // Create and show delete button above the header.
+                        show_column_delete_button(wrapper, header, &cell_pos_str);
+                        return;
+                    }
+
+                    // ── Table row handle click (select row) ────────────────
+                    if let Some(ref handle) = table_row_handle {
+                        if readonly { return; }
+                        ev.prevent_default();
+                        ev.stop_propagation();
+
+                        let wrapper = find_ancestor_by_class(handle, "kode-table-wrapper");
+                        let Some(ref wrapper) = wrapper else { return };
+                        let Some(row_index_str) = handle.get_attribute("data-row-index") else { return };
+                        let Some(cell_pos_str) = handle.get_attribute("data-cell-pos") else { return };
+
+                        // Clear any previous selection.
+                        let _ = wrapper.remove_attribute("data-selected-col");
+                        clear_table_selection_highlights(wrapper);
+
+                        // Set row selection.
+                        let _ = wrapper.set_attribute("data-selected-row", &row_index_str);
+                        let _ = handle.class_list().add_1("kode-row-handle-active");
+
+                        // Highlight the selected row.
+                        let Ok(row_index) = row_index_str.parse::<usize>() else { return };
+                        highlight_row(wrapper, row_index);
+
+                        // Create and show delete button on the handle.
+                        show_row_delete_button(wrapper, handle, &cell_pos_str);
+                        return;
+                    }
+
+                    // ── Click inside table but not on a control — clear selection ──
+                    {
+                        let mut walk_el = Some(target_el.clone());
+                        let mut in_table_wrapper = false;
+                        while let Some(ref current) = walk_el {
+                            if current.class_list().contains("kode-table-wrapper") {
+                                // Clear selection on this wrapper.
+                                if current.has_attribute("data-selected-col")
+                                    || current.has_attribute("data-selected-row")
+                                {
+                                    let _ = current.remove_attribute("data-selected-col");
+                                    let _ = current.remove_attribute("data-selected-row");
+                                    clear_table_selection_highlights(current);
+                                }
+                                in_table_wrapper = true;
+                                break;
+                            }
+                            if current.class_list().contains("wysiwyg-scroll-container") {
+                                break;
+                            }
+                            walk_el = current.parent_element();
+                        }
+
+                        // If clicking outside any table wrapper, clear all table selections.
+                        if !in_table_wrapper {
+                            if let Some(container) = editor_ref.get_untracked() {
+                                let container_el: &web_sys::Element = container.as_ref();
+                                if let Ok(wrappers) = container_el.query_selector_all(".kode-table-wrapper[data-selected-col], .kode-table-wrapper[data-selected-row]") {
+                                    for i in 0..wrappers.length() {
+                                        if let Some(node) = wrappers.item(i) {
+                                            let w: web_sys::Element = node.unchecked_into();
+                                            let _ = w.remove_attribute("data-selected-col");
+                                            let _ = w.remove_attribute("data-selected-row");
+                                            clear_table_selection_highlights(&w);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // ── Code copy button ────────────────────────────────────
@@ -4352,8 +4516,8 @@ fn mount_table_insert_handles(table: &web_sys::Element) {
     // If the table is already wrapped, reuse the wrapper but clear stale handles.
     let wrapper = if let Some(parent) = table.parent_element() {
         if parent.class_list().contains("kode-table-wrapper") {
-            // Remove old row and column insert handles.
-            let selectors = ".kode-table-row-insert, .kode-table-col-insert";
+            // Remove old row/column insert handles, column headers, row handles, and delete buttons.
+            let selectors = ".kode-table-row-insert, .kode-table-col-insert, .kode-table-col-header, .kode-table-row-handle, .kode-table-selection-delete";
             if let Ok(old_handles) = parent.query_selector_all(selectors) {
                 for i in 0..old_handles.length() {
                     if let Some(h) = old_handles.item(i) {
@@ -4361,6 +4525,10 @@ fn mount_table_insert_handles(table: &web_sys::Element) {
                     }
                 }
             }
+            // Clear stale selection state and highlight classes.
+            let _ = parent.remove_attribute("data-selected-col");
+            let _ = parent.remove_attribute("data-selected-row");
+            clear_table_selection_highlights(&parent);
             parent
         } else {
             // First mount: create wrapper.
@@ -4474,6 +4642,203 @@ fn mount_table_insert_handles(table: &web_sys::Element) {
                     let _ = html.style().set_property("height", &format!("{handle_height}px"));
                 }
                 let _ = wrapper.append_child(&handle);
+            }
+
+            // ── Column header strips ──────────────────────────────────
+            // One strip above each column, clickable to select that column.
+            for (j, (ref rect, ref pos)) in cell_infos.iter().enumerate() {
+                let Ok(header) = doc.create_element("div") else { continue };
+                let _ = header.set_attribute("class", "kode-table-col-header");
+                let _ = header.set_attribute("contenteditable", "false");
+                let _ = header.set_attribute("data-col-index", &j.to_string());
+                let _ = header.set_attribute("data-cell-pos", pos);
+
+                let left = rect.left() - wrapper_rect.left();
+                let width = rect.width();
+                let top = table_rect.top() - wrapper_rect.top();
+
+                if let Some(html) = header.dyn_ref::<HtmlElement>() {
+                    let _ = html.style().set_property("left", &format!("{left}px"));
+                    let _ = html.style().set_property("width", &format!("{width}px"));
+                    let _ = html.style().set_property("top", &format!("{}px", top - 16.0));
+                }
+                let _ = wrapper.append_child(&header);
+            }
+        }
+    }
+
+    // ── Row selection handles ──────────────────────────────────────
+    // One handle at the left edge of each row, clickable to select that row.
+    let rows_for_handles = table.query_selector_all("tr.wysiwyg-table-row");
+    if let Ok(rows) = rows_for_handles {
+        let wrapper_rect = wrapper.get_bounding_client_rect();
+        for i in 0..rows.length() {
+            let Some(row_node) = rows.item(i) else { continue };
+            let Some(row_el) = row_node.dyn_ref::<web_sys::Element>() else { continue };
+            let row_rect = row_el.get_bounding_client_rect();
+
+            let cell_pos = row_el
+                .query_selector("td[data-pos-start], th[data-pos-start]")
+                .ok()
+                .flatten()
+                .and_then(|cell| cell.get_attribute("data-pos-start"));
+
+            let Some(pos_str) = cell_pos else { continue };
+
+            let Ok(handle) = doc.create_element("div") else { continue };
+            let _ = handle.set_attribute("class", "kode-table-row-handle");
+            let _ = handle.set_attribute("contenteditable", "false");
+            let _ = handle.set_attribute("data-row-index", &i.to_string());
+            let _ = handle.set_attribute("data-cell-pos", &pos_str);
+
+            let top = row_rect.top() - wrapper_rect.top();
+            let height = row_rect.height();
+
+            if let Some(html) = handle.dyn_ref::<HtmlElement>() {
+                let _ = html.style().set_property("top", &format!("{top}px"));
+                let _ = html.style().set_property("height", &format!("{height}px"));
+            }
+            let _ = wrapper.append_child(&handle);
+        }
+    }
+}
+
+/// Walk up from `el` to find the closest ancestor with the given class.
+fn find_ancestor_by_class(el: &web_sys::Element, class: &str) -> Option<web_sys::Element> {
+    let mut current = el.parent_element();
+    while let Some(ref parent) = current {
+        if parent.class_list().contains(class) {
+            return current;
+        }
+        current = parent.parent_element();
+    }
+    None
+}
+
+/// Highlight all cells in the given column index within a table wrapper.
+fn highlight_column(wrapper: &web_sys::Element, col_index: usize) {
+    // Query all rows in the table, then highlight the nth cell in each.
+    let Ok(table) = wrapper.query_selector("table.wysiwyg-table") else { return };
+    let Some(table) = table else { return };
+    let Ok(rows) = table.query_selector_all("tr.wysiwyg-table-row") else { return };
+    for i in 0..rows.length() {
+        let Some(row_node) = rows.item(i) else { continue };
+        let Some(row_el) = row_node.dyn_ref::<web_sys::Element>() else { continue };
+        let Ok(cells) = row_el.query_selector_all("td.wysiwyg-table-cell, th.wysiwyg-table-cell") else { continue };
+        if let Some(cell_node) = cells.item(col_index as u32) {
+            let cell: web_sys::Element = cell_node.unchecked_into();
+            let _ = cell.class_list().add_1("kode-col-selected");
+        }
+    }
+}
+
+/// Highlight the row at the given index within a table wrapper.
+fn highlight_row(wrapper: &web_sys::Element, row_index: usize) {
+    let Ok(table) = wrapper.query_selector("table.wysiwyg-table") else { return };
+    let Some(table) = table else { return };
+    let Ok(rows) = table.query_selector_all("tr.wysiwyg-table-row") else { return };
+    if let Some(row_node) = rows.item(row_index as u32) {
+        let row: web_sys::Element = row_node.unchecked_into();
+        let _ = row.class_list().add_1("kode-row-selected");
+    }
+}
+
+/// Create and position a delete button above a selected column header.
+fn show_column_delete_button(
+    wrapper: &web_sys::Element,
+    header: &web_sys::Element,
+    cell_pos: &str,
+) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(btn) = doc.create_element("div") else { return };
+    let _ = btn.set_attribute("class", "kode-table-selection-delete");
+    let _ = btn.set_attribute("contenteditable", "false");
+    let _ = btn.set_attribute("data-cell-pos", cell_pos);
+    btn.set_inner_html("\u{00d7}"); // multiplication sign ×
+
+    let wrapper_rect = wrapper.get_bounding_client_rect();
+    let header_rect = header.get_bounding_client_rect();
+
+    // Center the delete button above the header strip.
+    let left = (header_rect.left() + header_rect.width() / 2.0) - wrapper_rect.left() - 9.0;
+    let top = (header_rect.top() - wrapper_rect.top()) - 20.0;
+
+    if let Some(html) = btn.dyn_ref::<HtmlElement>() {
+        let _ = html.style().set_property("left", &format!("{left}px"));
+        let _ = html.style().set_property("top", &format!("{top}px"));
+        let _ = html.style().set_property("display", "flex");
+    }
+    let _ = wrapper.append_child(&btn);
+}
+
+/// Create and position a delete button next to a selected row handle.
+fn show_row_delete_button(
+    wrapper: &web_sys::Element,
+    handle: &web_sys::Element,
+    cell_pos: &str,
+) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(btn) = doc.create_element("div") else { return };
+    let _ = btn.set_attribute("class", "kode-table-selection-delete");
+    let _ = btn.set_attribute("contenteditable", "false");
+    let _ = btn.set_attribute("data-cell-pos", cell_pos);
+    btn.set_inner_html("\u{00d7}"); // multiplication sign ×
+
+    let wrapper_rect = wrapper.get_bounding_client_rect();
+    let handle_rect = handle.get_bounding_client_rect();
+
+    // Position the delete button to the left of the row handle.
+    let left = (handle_rect.left() - wrapper_rect.left()) - 22.0;
+    let top = (handle_rect.top() + handle_rect.height() / 2.0) - wrapper_rect.top() - 9.0;
+
+    if let Some(html) = btn.dyn_ref::<HtmlElement>() {
+        let _ = html.style().set_property("left", &format!("{left}px"));
+        let _ = html.style().set_property("top", &format!("{top}px"));
+        let _ = html.style().set_property("display", "flex");
+    }
+    let _ = wrapper.append_child(&btn);
+}
+
+/// Clear column/row selection highlight classes from all cells and rows in a wrapper.
+fn clear_table_selection_highlights(wrapper: &web_sys::Element) {
+    if let Ok(highlighted) = wrapper.query_selector_all(".kode-col-selected") {
+        for i in 0..highlighted.length() {
+            if let Some(node) = highlighted.item(i) {
+                let el: web_sys::Element = node.unchecked_into();
+                let _ = el.class_list().remove_1("kode-col-selected");
+            }
+        }
+    }
+    if let Ok(highlighted) = wrapper.query_selector_all(".kode-row-selected") {
+        for i in 0..highlighted.length() {
+            if let Some(node) = highlighted.item(i) {
+                let el: web_sys::Element = node.unchecked_into();
+                let _ = el.class_list().remove_1("kode-row-selected");
+            }
+        }
+    }
+    // Also clear active state from headers and handles.
+    if let Ok(headers) = wrapper.query_selector_all(".kode-table-col-header.kode-col-header-active") {
+        for i in 0..headers.length() {
+            if let Some(node) = headers.item(i) {
+                let el: web_sys::Element = node.unchecked_into();
+                let _ = el.class_list().remove_1("kode-col-header-active");
+            }
+        }
+    }
+    if let Ok(handles) = wrapper.query_selector_all(".kode-table-row-handle.kode-row-handle-active") {
+        for i in 0..handles.length() {
+            if let Some(node) = handles.item(i) {
+                let el: web_sys::Element = node.unchecked_into();
+                let _ = el.class_list().remove_1("kode-row-handle-active");
+            }
+        }
+    }
+    // Remove any visible delete buttons.
+    if let Ok(delete_btns) = wrapper.query_selector_all(".kode-table-selection-delete") {
+        for i in 0..delete_btns.length() {
+            if let Some(node) = delete_btns.item(i) {
+                node.unchecked_ref::<web_sys::Element>().remove();
             }
         }
     }
