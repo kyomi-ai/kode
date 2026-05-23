@@ -1257,38 +1257,12 @@ tr.kode-row-selected {
     transform: scale(1.1);
 }
 
-/* ── Column resize handles ──────────────────────────────────────── */
-
-.kode-table-col-resize {
-    position: absolute;
-    width: 6px;
-    margin-left: -3px; /* center on the border */
-    cursor: col-resize;
-    z-index: 10;
-    background: transparent;
-    user-select: none;
-}
-
-.kode-table-col-resize:hover,
-.kode-table-col-resize.kode-resizing {
-    background: var(--kode-table-resize-handle-bg, var(--kode-accent));
-    opacity: 0.5;
-}
-
-/* While a column resize is in progress, override cursor everywhere. */
-.kode-col-resizing,
-.kode-col-resizing * {
-    cursor: col-resize !important;
-    user-select: none !important;
-}
-
 /* Hide table insert handles, column headers, row handles in readonly mode */
 .wysiwyg-readonly .kode-table-row-insert,
 .wysiwyg-readonly .kode-table-col-insert,
 .wysiwyg-readonly .kode-table-col-header,
 .wysiwyg-readonly .kode-table-row-handle,
-.wysiwyg-readonly .kode-table-selection-delete,
-.wysiwyg-readonly .kode-table-col-resize {
+.wysiwyg-readonly .kode-table-selection-delete {
     display: none;
 }
 
