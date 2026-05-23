@@ -41,6 +41,10 @@ pub fn MarkdownEditorComponent(
     /// WYSIWYG editor.
     #[prop(default = false)]
     enable_block_drag: bool,
+    /// Read-only mode signal. When true, editing is disabled and toolbars
+    /// are hidden.
+    #[prop(into, default = Signal::stored(false))]
+    readonly: Signal<bool>,
 ) -> impl IntoView {
     let mode = RwSignal::new(initial_mode);
 
@@ -52,10 +56,17 @@ pub fn MarkdownEditorComponent(
     let on_change_wysiwyg = on_change;
     let extensions = StoredValue::new(extensions);
 
+    Effect::new(move |_| {
+        if readonly.get() && mode.get_untracked() == EditorMode::Source {
+            mode.set(EditorMode::Wysiwyg);
+        }
+    });
+
     view! {
         <div style=move || format!("display:flex;flex-direction:column;height:100%;{}", theme.get().to_css_vars())>
-            // ── Mode toggle bar ──────────────────────────────────────────
-            <div class="kode-mode-toggle">
+            // ── Mode toggle bar (hidden in readonly mode) ────────────────
+            <div class="kode-mode-toggle"
+                 style=move || if readonly.get() { "display:none" } else { "" }>
                 <button
                     class=move || if mode.get() == EditorMode::Source {
                         "kode-mode-toggle-button active"
@@ -81,6 +92,7 @@ pub fn MarkdownEditorComponent(
             // ── Editor area ──────────────────────────────────────────────
             <div style="flex:1;overflow:hidden;">
                 {move || {
+                    let ro = readonly.get();
                     match mode.get() {
                         EditorMode::Source => {
                             let cb = on_change_source.clone();
@@ -106,6 +118,7 @@ pub fn MarkdownEditorComponent(
                                     theme=theme
                                     extensions=exts
                                     enable_block_drag=enable_block_drag
+                                    readonly=ro
                                 />
                             }.into_any()
                         }

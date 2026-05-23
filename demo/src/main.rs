@@ -137,6 +137,7 @@ fn App() -> impl IntoView {
     let markdown_sample = "# Dashboard Documentation\n\nThis dashboard tracks **monthly revenue** across all regions.\n\n```chart\ntitle: Monthly Revenue\ntype: bar\ncolSpan: 6\n```\n\n```chart\ntitle: Regional Breakdown\ntype: pie\ncolSpan: 6\n```\n\n## Data Sources\n\n- `production-bq`: BigQuery production dataset\n- `analytics-ch`: ClickHouse analytics cluster\n\n## Metrics\n\n| Metric | Q1 | Q2 | Q3 |\n| --- | --- | --- | --- |\n| Revenue | $1.2M | $1.5M | $1.8M |\n| Users | 12,400 | 15,200 | 18,100 |\n| Conversion | 3.2% | 3.8% | 4.1% |\n\n## Usage\n\n1. Select a date range from the picker\n2. Choose one or more regions\n3. Click **Apply** to refresh\n\n```chart\ntitle: User Growth\ntype: line\n```\n\n```sql\nSELECT region, SUM(revenue)\nFROM sales\nGROUP BY region\n```\n\n> Note: Data refreshes every 5 minutes.\n\n```chart\ntitle: Conversion Funnel\ntype: funnel\n```\n\n### Links\n\nSee [the docs](https://example.com) for more information.\n\n---\n\n*Last updated: March 2026*";
 
     let (md_content, set_md_content) = signal(markdown_sample.to_string());
+    let (md_readonly, set_md_readonly) = signal(false);
 
     // ── SQL completion provider ──────────────────────────────────
     let sql_completion = CompletionProviderConfig {
@@ -275,9 +276,26 @@ fn App() -> impl IntoView {
                 if active_tab.get() == "markdown" {
                     view! {
                         <div>
-                            <p style=move || format!("color:{};font-size:12px;margin-bottom:12px;", theme.get().fg_dim)>
-                                "Switch between Source and WYSIWYG modes. Toolbar available in WYSIWYG mode. Ctrl+B/I for bold/italic."
-                            </p>
+                            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                                <p style=move || format!("color:{};font-size:12px;margin:0;", theme.get().fg_dim)>
+                                    "Switch between Source and WYSIWYG modes. Toolbar available in WYSIWYG mode. Ctrl+B/I for bold/italic."
+                                </p>
+                                <button
+                                    style=move || {
+                                        let t = theme.get();
+                                        let ro = md_readonly.get();
+                                        format!(
+                                            "padding:4px 12px;border-radius:6px;border:1px solid {};background:{};color:{};cursor:pointer;font-size:12px;white-space:nowrap;",
+                                            if ro { t.accent } else { t.border },
+                                            if ro { t.accent } else { "transparent" },
+                                            if ro { t.bg } else { t.fg_dim },
+                                        )
+                                    }
+                                    on:click=move |_| set_md_readonly.update(|v| *v = !*v)
+                                >
+                                    {move || if md_readonly.get() { "Read-only: ON" } else { "Read-only: OFF" }}
+                                </button>
+                            </div>
                             <div style=move || format!("height:600px;border:1px solid {};border-radius:8px;overflow:hidden;", theme.get().border)>
                                 <MarkdownEditorComponent
                                     content=md_content
@@ -289,6 +307,7 @@ fn App() -> impl IntoView {
                                     extensions=vec![Arc::new(ChartDemoExtension) as Arc<dyn Extension>]
                                     enable_block_drag=true
                                     show_floating_toolbar=true
+                                    readonly=md_readonly
                                 />
                             </div>
                         </div>

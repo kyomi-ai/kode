@@ -4485,6 +4485,51 @@ mod auto_convert_list_tests {
         ds.insert_text("[]");
         assert!(!ds.try_auto_convert_list_on_space());
     }
+
+    #[test]
+    fn auto_convert_task_list_cursor_and_roundtrip() {
+        let mut ds = DocState::from_markdown("");
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+
+        let sel = ds.selection();
+        let md1 = ds.to_markdown();
+
+        let resolved = ds.doc().resolve(sel.head);
+        let parent = resolved.parent();
+        assert!(parent.node_type.is_textblock(), "cursor should be in a textblock");
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        let ds2 = DocState::from_markdown(&md1);
+        let md2 = ds2.to_markdown();
+        assert_eq!(md1, md2, "markdown roundtrip should be stable");
+    }
+
+    #[test]
+    fn auto_convert_task_list_with_content_cursor_and_roundtrip() {
+        let mut ds = DocState::from_markdown("hello world");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+
+        let sel = ds.selection();
+        let md1 = ds.to_markdown();
+
+        // Cursor should be inside the task list paragraph, before "hello world".
+        let resolved = ds.doc().resolve(sel.head);
+        let parent = resolved.parent();
+        assert!(parent.node_type.is_textblock());
+        assert!(ds.is_in_node(NodeType::TaskList));
+
+        // Verify text content is preserved.
+        let text_content = parent.text_content();
+        assert_eq!(text_content, "hello world");
+
+        // Roundtrip check.
+        let ds2 = DocState::from_markdown(&md1);
+        let md2 = ds2.to_markdown();
+        assert_eq!(md1, md2, "markdown roundtrip should be stable");
+    }
 }
 
 mod task_list_tests {
