@@ -2727,15 +2727,12 @@ pub fn TreeWysiwygEditor(
 
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
-    let doc_resize = doc_state.clone();
-    let on_change_resize = on_change.clone();
     let on_mousedown = move |ev: MouseEvent| {
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
         // Prevent focus loss when mousedown lands on the copy button,
         // table insert handles, or cursor placement when Ctrl/Cmd+clicking a link.
-        // NOTE: resize handles are excluded — they need to fall through to start a drag.
         let mut walk = Some(target_el.clone());
         while let Some(ref current) = walk {
             if current.class_list().contains("wysiwyg-code-copy")
@@ -2747,11 +2744,6 @@ pub fn TreeWysiwygEditor(
             {
                 ev.prevent_default();
                 return;
-            }
-            if current.class_list().contains("kode-table-col-resize") {
-                ev.prevent_default();
-                // Don't return — fall through so the resize handler below can start a drag.
-                break;
             }
             if !readonly
                 && (ev.ctrl_key() || ev.meta_key())
@@ -2765,32 +2757,6 @@ pub fn TreeWysiwygEditor(
                 break;
             }
             walk = current.parent_element();
-        }
-
-        // If the mousedown landed on a resize handle, start the column
-        // resize drag immediately (before extension-block detection).
-        if !readonly && target_el.class_list().contains("kode-table-col-resize") {
-            let wrapper = find_ancestor_by_class(target_el, "kode-table-wrapper");
-            if let Some(wrapper) = wrapper {
-                if let (Some(cl), Some(cr)) = (
-                    target_el.get_attribute("data-col-left"),
-                    target_el.get_attribute("data-col-right"),
-                ) {
-                    if let (Ok(col_left), Ok(col_right)) = (cl.parse::<usize>(), cr.parse::<usize>()) {
-                        let _ = target_el.class_list().add_1("kode-resizing");
-                        start_column_resize_drag(
-                            &wrapper,
-                            col_left,
-                            col_right,
-                            ev.client_x() as f64,
-                            doc_resize.clone(),
-                            on_change_resize.clone(),
-                            version,
-                        );
-                        return;
-                    }
-                }
-            }
         }
 
         if readonly { return; }
@@ -2974,10 +2940,6 @@ pub fn TreeWysiwygEditor(
                         if current.class_list().contains("kode-table-selection-delete") {
                             table_sel_delete = Some(current.clone());
                             break;
-                        }
-                        // Resize handles are handled in mousedown, not click.
-                        if current.class_list().contains("kode-table-col-resize") {
-                            return;
                         }
                         if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
                             delete_btn = Some(current.clone());
@@ -4556,8 +4518,8 @@ fn mount_table_insert_handles(table: &web_sys::Element) {
     // If the table is already wrapped, reuse the wrapper but clear stale handles.
     let wrapper = if let Some(parent) = table.parent_element() {
         if parent.class_list().contains("kode-table-wrapper") {
-            // Remove old row/column insert handles, column headers, row handles, delete buttons, and resize handles.
-            let selectors = ".kode-table-row-insert, .kode-table-col-insert, .kode-table-col-header, .kode-table-row-handle, .kode-table-selection-delete, .kode-table-col-resize";
+            // Remove old row/column insert handles, column headers, row handles, and delete buttons.
+            let selectors = ".kode-table-row-insert, .kode-table-col-insert, .kode-table-col-header, .kode-table-row-handle, .kode-table-selection-delete";
             if let Ok(old_handles) = parent.query_selector_all(selectors) {
                 for i in 0..old_handles.length() {
                     if let Some(h) = old_handles.item(i) {
@@ -4705,28 +4667,6 @@ fn mount_table_insert_handles(table: &web_sys::Element) {
                 let _ = wrapper.append_child(&header);
             }
 
-            // ── Column resize handles ────────────────────────────────
-            // One handle at each column boundary (between adjacent header
-            // cells), draggable to resize columns.
-            for j in 0..cell_infos.len().saturating_sub(1) {
-                let (ref rect, _) = cell_infos[j];
-                let Ok(handle) = doc.create_element("div") else { continue };
-                let _ = handle.set_attribute("class", "kode-table-col-resize");
-                let _ = handle.set_attribute("contenteditable", "false");
-                let _ = handle.set_attribute("data-col-left", &j.to_string());
-                let _ = handle.set_attribute("data-col-right", &(j + 1).to_string());
-
-                let left = rect.right() - wrapper_rect.left();
-                let resize_top = table_rect.top() - wrapper_rect.top();
-                let resize_height = table_rect.height();
-
-                if let Some(html) = handle.dyn_ref::<HtmlElement>() {
-                    let _ = html.style().set_property("left", &format!("{left}px"));
-                    let _ = html.style().set_property("top", &format!("{resize_top}px"));
-                    let _ = html.style().set_property("height", &format!("{resize_height}px"));
-                }
-                let _ = wrapper.append_child(&handle);
-            }
         }
     }
 
@@ -4907,197 +4847,6 @@ fn clear_table_selection_highlights(wrapper: &web_sys::Element) {
     }
 }
 
-/// Start a column resize drag operation.
-///
-/// Attaches `mousemove` and `mouseup` listeners to the document for the
-/// duration of the drag. During the drag, column widths are applied directly
-/// to `<col>` elements for instant visual feedback. On mouseup, the final
-/// widths are committed to the document model via `set_column_widths_at()`.
-///
-/// `col_left` and `col_right` are the 0-based indices of the columns on
-/// either side of the resize handle.
-fn start_column_resize_drag(
-    wrapper: &web_sys::Element,
-    col_left: usize,
-    col_right: usize,
-    start_x: f64,
-    doc_state: Arc<Mutex<DocState>>,
-    on_change: Option<Arc<dyn Fn(String) + Send + Sync>>,
-    version: RwSignal<u64>,
-) {
-    let Some(window) = web_sys::window() else { return };
-    let Some(document) = window.document() else { return };
-
-    // Find the table inside the wrapper.
-    let Ok(Some(table)) = wrapper.query_selector("table.wysiwyg-table") else { return };
-    let table_rect = table.get_bounding_client_rect();
-    let table_width = table_rect.width();
-    if table_width <= 0.0 {
-        return;
-    }
-
-    // Read current column widths from the DOM (header cells).
-    let Ok(header_cells) = table.query_selector_all("thead th.wysiwyg-table-cell") else { return };
-    let col_count = header_cells.length() as usize;
-    if col_count == 0 || col_left >= col_count || col_right >= col_count {
-        return;
-    }
-
-    let mut current_widths: Vec<f64> = Vec::with_capacity(col_count);
-    for i in 0..col_count {
-        let Some(cell_node) = header_cells.item(i as u32) else { continue };
-        let cell: web_sys::Element = cell_node.unchecked_into();
-        let cell_rect = cell.get_bounding_client_rect();
-        current_widths.push(cell_rect.width() / table_width * 100.0);
-    }
-
-    if current_widths.len() != col_count {
-        return;
-    }
-
-    // Minimum column width in percentage.
-    let min_pct = (30.0 / table_width * 100.0_f64).max(5.0);
-
-    // Ensure the table has fixed layout and a colgroup for live feedback.
-    let _ = table.class_list().add_1("wysiwyg-table-fixed");
-    let colgroup = if let Ok(Some(cg)) = table.query_selector("colgroup") {
-        cg
-    } else {
-        let Ok(cg) = document.create_element("colgroup") else { return };
-        for w in &current_widths {
-            let Ok(col) = document.create_element("col") else { continue };
-            if let Some(html) = col.dyn_ref::<HtmlElement>() {
-                let _ = html.style().set_property("width", &format!("{w:.2}%"));
-            }
-            let _ = cg.append_child(&col);
-        }
-        // Insert colgroup as the first child of the table.
-        let _ = table.prepend_with_node_1(&cg);
-        cg
-    };
-
-    // Get the table's data-pos-start for committing to the doc model.
-    let table_pos_start = table
-        .get_attribute("data-pos-start")
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
-
-    // Add a class to the body to force col-resize cursor everywhere during drag.
-    let _ = document
-        .document_element()
-        .map(|root| root.class_list().add_1("kode-col-resizing"));
-
-    // Snapshot the initial widths for the two columns being resized
-    // BEFORE current_widths is moved into the Arc.
-    let initial_left_width = current_widths[col_left];
-    let initial_right_width = current_widths[col_right];
-    let total_pair = initial_left_width + initial_right_width;
-
-    // Shared state for the drag (Rc/RefCell — single-threaded WASM).
-    let widths = std::rc::Rc::new(std::cell::RefCell::new(current_widths));
-    let colgroup_ref = colgroup.clone();
-
-    type ClosureSlot = std::rc::Rc<std::cell::RefCell<Option<Closure<dyn FnMut(MouseEvent)>>>>;
-    let move_closure: ClosureSlot = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let up_closure: ClosureSlot = std::rc::Rc::new(std::cell::RefCell::new(None));
-
-    let move_ref = move_closure.clone();
-    let up_ref = up_closure.clone();
-
-    // mousemove: update <col> widths for live feedback.
-    let widths_move = widths.clone();
-    let colgroup_move = colgroup_ref.clone();
-    let on_move = Closure::<dyn FnMut(MouseEvent)>::new(move |ev: MouseEvent| {
-        let delta_x = ev.client_x() as f64 - start_x;
-        let delta_pct = delta_x / table_width * 100.0;
-
-        let mut w = widths_move.borrow_mut();
-
-        // Apply delta against the initial widths (not mutated current values)
-        // to avoid accumulation errors on repeated mousemove events.
-        let clamped_left = (initial_left_width + delta_pct).clamp(min_pct, total_pair - min_pct);
-        let clamped_right = total_pair - clamped_left;
-
-        w[col_left] = clamped_left;
-        w[col_right] = clamped_right;
-
-        // Update <col> elements for instant visual feedback.
-        let Ok(cols) = colgroup_move.query_selector_all("col") else { return };
-        for i in 0..cols.length() {
-            if let Some(col_node) = cols.item(i) {
-                let col_el: web_sys::Element = col_node.unchecked_into();
-                if let Some(html) = col_el.dyn_ref::<HtmlElement>() {
-                    let _ = html
-                        .style()
-                        .set_property("width", &format!("{:.2}%", w[i as usize]));
-                }
-            }
-        }
-    });
-
-    // mouseup: commit widths to doc model, remove listeners.
-    let widths_up = widths;
-    let doc_up = doc_state;
-    let on_change_up = on_change;
-    let document_up = document.clone();
-    let on_up = Closure::<dyn FnMut(MouseEvent)>::new(move |_ev: MouseEvent| {
-        // Remove the cursor override.
-        let _ = document_up
-            .document_element()
-            .map(|root| root.class_list().remove_1("kode-col-resizing"));
-
-        // Commit widths to the document model.
-        {
-            let w = widths_up.borrow();
-            if let Ok(mut ds) = doc_up.lock() {
-                ds.set_column_widths_at(table_pos_start, w.clone());
-                let md = ds.to_markdown();
-                drop(ds);
-                version.update(|v| *v += 1);
-                if let Some(ref cb) = on_change_up {
-                    cb(md);
-                }
-            }
-        }
-
-        // Clean up: remove listeners.
-        {
-            let mut mc = move_ref.borrow_mut();
-            if let Some(ref closure) = *mc {
-                let _ = document_up.remove_event_listener_with_callback(
-                    "mousemove",
-                    closure.as_ref().unchecked_ref(),
-                );
-            }
-            *mc = None;
-        }
-        {
-            let mut uc = up_ref.borrow_mut();
-            if let Some(ref closure) = *uc {
-                let _ = document_up.remove_event_listener_with_callback(
-                    "mouseup",
-                    closure.as_ref().unchecked_ref(),
-                );
-            }
-            *uc = None;
-        }
-    });
-
-    // Attach listeners to the document (not the handle) so drag works even
-    // if the mouse moves outside the handle.
-    let _ = document.add_event_listener_with_callback(
-        "mousemove",
-        on_move.as_ref().unchecked_ref(),
-    );
-    let _ = document.add_event_listener_with_callback(
-        "mouseup",
-        on_up.as_ref().unchecked_ref(),
-    );
-
-    // Store closures so they stay alive for the duration of the drag.
-    *move_closure.borrow_mut() = Some(on_move);
-    *up_closure.borrow_mut() = Some(on_up);
-}
 
 /// Mount table insert handles on all table elements within a container.
 #[cfg(target_arch = "wasm32")]
