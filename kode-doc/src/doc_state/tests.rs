@@ -3058,6 +3058,163 @@ mod move_block_tests {
         state.move_block(0, 7, 14);
         assert!(state.redo_stack.is_empty(), "redo stack should be cleared after move_block");
     }
+
+    /// Build a task list with 3 items for drag-reorder tests.
+    ///
+    /// Structure:
+    /// ```text
+    /// <doc>                         pos 0 (implicit)
+    ///   <TaskList>                  pos 0
+    ///     <ListItem checked=false>  pos 1
+    ///       <Paragraph>             pos 2
+    ///         "Alpha"               pos 3..8
+    ///       </Paragraph>            pos 8
+    ///     </ListItem>               pos 9
+    ///     <ListItem checked=true>   pos 10
+    ///       <Paragraph>             pos 11
+    ///         "Bravo"               pos 12..17
+    ///       </Paragraph>            pos 17
+    ///     </ListItem>               pos 18
+    ///     <ListItem checked=false>  pos 19
+    ///       <Paragraph>             pos 20
+    ///         "Charlie"             pos 21..28
+    ///       </Paragraph>            pos 28
+    ///     </ListItem>               pos 29
+    ///   </TaskList>                 pos 30
+    /// </doc>
+    /// ```
+    ///
+    /// Each ListItem node_size: 1(open) + 1(p_open) + text_len + 1(p_close) + 1(close)
+    ///   Alpha:   1 + 1 + 5 + 1 + 1 = 9  -> occupies 1..10
+    ///   Bravo:   1 + 1 + 5 + 1 + 1 = 9  -> occupies 10..19
+    ///   Charlie: 1 + 1 + 7 + 1 + 1 = 11 -> occupies 19..30
+    fn three_item_task_list() -> Node {
+        use crate::attrs::task_item_attrs;
+
+        let item_alpha = Node::branch_with_attrs(
+            NodeType::ListItem,
+            task_item_attrs(false),
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("Alpha")),
+            )),
+        );
+        let item_bravo = Node::branch_with_attrs(
+            NodeType::ListItem,
+            task_item_attrs(true),
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("Bravo")),
+            )),
+        );
+        let item_charlie = Node::branch_with_attrs(
+            NodeType::ListItem,
+            task_item_attrs(false),
+            Fragment::from_node(Node::branch(
+                NodeType::Paragraph,
+                Fragment::from_node(Node::new_text("Charlie")),
+            )),
+        );
+        let task_list = Node::branch(
+            NodeType::TaskList,
+            Fragment::from_vec(vec![item_alpha, item_bravo, item_charlie]),
+        );
+        Node::branch(NodeType::Doc, Fragment::from_node(task_list))
+    }
+
+    #[test]
+    fn move_task_list_item_forward() {
+        // Move first item (Alpha) past the second (Bravo).
+        // Alpha occupies ListItem tokens 1..10, Bravo 10..19.
+        // Target = 19 (after Bravo's close token).
+        // Expected: Bravo, Alpha, Charlie.
+        let mut state = DocState::from_doc(three_item_task_list());
+        state.move_block(1, 10, 19);
+
+        let tl = state.doc.child(0);
+        assert_eq!(tl.child_count(), 3);
+        assert_eq!(tl.child(0).text_content(), "Bravo");
+        assert_eq!(tl.child(1).text_content(), "Alpha");
+        assert_eq!(tl.child(2).text_content(), "Charlie");
+    }
+
+    #[test]
+    fn move_task_list_item_backward() {
+        // Move third item (Charlie) before the first (Alpha).
+        // Charlie occupies ListItem tokens 19..30.
+        // Target = 1 (before Alpha's open token).
+        // Expected: Charlie, Alpha, Bravo.
+        let mut state = DocState::from_doc(three_item_task_list());
+        state.move_block(19, 30, 1);
+
+        let tl = state.doc.child(0);
+        assert_eq!(tl.child_count(), 3);
+        assert_eq!(tl.child(0).text_content(), "Charlie");
+        assert_eq!(tl.child(1).text_content(), "Alpha");
+        assert_eq!(tl.child(2).text_content(), "Bravo");
+    }
+
+    #[test]
+    fn move_task_list_item_preserves_checked_state() {
+        use crate::attrs::{AttrValue, get_attr};
+
+        // Move checked Bravo (item 2) to position 0 (before Alpha).
+        let mut state = DocState::from_doc(three_item_task_list());
+        state.move_block(10, 19, 1);
+
+        let tl = state.doc.child(0);
+        assert_eq!(tl.child_count(), 3);
+        // Bravo (now first) should still be checked.
+        assert_eq!(
+            get_attr(&tl.child(0).attrs, "checked"),
+            Some(&AttrValue::Bool(true)),
+            "Bravo should remain checked after move"
+        );
+        assert_eq!(tl.child(0).text_content(), "Bravo");
+        // Alpha (now second) should still be unchecked.
+        assert_eq!(
+            get_attr(&tl.child(1).attrs, "checked"),
+            Some(&AttrValue::Bool(false)),
+            "Alpha should remain unchecked after move"
+        );
+        assert_eq!(tl.child(1).text_content(), "Alpha");
+    }
+
+    #[test]
+    fn move_task_list_item_markdown_roundtrip() {
+        // Move first item to end, then verify markdown output.
+        let mut state = DocState::from_doc(three_item_task_list());
+        let doc_size = state.doc.content.size();
+        // Task list end is at doc_size (last close token of TaskList).
+        // But we need to insert inside the TaskList, so target the
+        // position just before the TaskList's close token.
+        // Actually, move_block inserts at an absolute position.
+        // The TaskList close token is at position 30, so insert at 30
+        // to place after Charlie but before the TaskList closes.
+        state.move_block(1, 10, 30);
+
+        let md = state.to_markdown();
+        // Bravo should come first, then Charlie, then Alpha.
+        let bravo_pos = md.find("Bravo").expect("Bravo should be in markdown");
+        let charlie_pos = md.find("Charlie").expect("Charlie should be in markdown");
+        let alpha_pos = md.find("Alpha").expect("Alpha should be in markdown");
+        assert!(
+            bravo_pos < charlie_pos && charlie_pos < alpha_pos,
+            "Expected Bravo < Charlie < Alpha in markdown, got: {md:?}"
+        );
+
+        // Verify roundtrip: parse the markdown back and check structure.
+        let roundtrip = DocState::from_markdown(&md);
+        assert_eq!(roundtrip.doc.child(0).node_type, NodeType::TaskList);
+        assert_eq!(roundtrip.doc.child(0).child_count(), 3);
+
+        // Ensure doc_size stays reasonable (no orphaned tokens).
+        assert_eq!(
+            state.doc.content.size(),
+            doc_size,
+            "document size should be unchanged after reorder"
+        );
+    }
 }
 
 mod cursor_movement_tests {
