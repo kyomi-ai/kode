@@ -809,6 +809,20 @@ body.kode-dragging * {
     opacity: 1;
 }
 
+/* Bullet / ordered list item drag handles — needs position: relative so
+ * the absolutely-positioned handle is anchored to the list item. */
+.wysiwyg-list-item {
+    position: relative;
+}
+
+.wysiwyg-list-item > .kode-drag-handle {
+    left: var(--kode-list-drag-handle-left, -24px);
+}
+
+.wysiwyg-list-item:hover > .kode-drag-handle {
+    opacity: 1;
+}
+
 /* ── Slash Command Menu ────────────────────────────────────────────── */
 
 .kode-slash-menu {
