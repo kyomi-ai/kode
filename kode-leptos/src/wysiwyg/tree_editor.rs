@@ -1432,7 +1432,7 @@ pub fn TreeWysiwygEditor(
     // ── Task checkbox click handler ────────────────────────────────────
     // Detect clicks on `.kode-checkbox` elements inside task lists and
     // toggle the corresponding ListItem's checked attribute.
-    if !readonly {
+    {
         let doc_checkbox = doc_state.clone();
         let notify_checkbox = notify.clone();
 
@@ -1444,6 +1444,11 @@ pub fn TreeWysiwygEditor(
             }
             ev.prevent_default();
             ev.stop_propagation();
+
+            // In readonly mode, suppress the native toggle but don't modify the document.
+            if readonly {
+                return;
+            }
 
             let Some(pos_str) = target_el.get_attribute("data-task-pos") else { return };
             let Ok(pos) = pos_str.parse::<usize>() else { return };
