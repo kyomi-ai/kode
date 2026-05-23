@@ -145,7 +145,7 @@ pub fn TreeWysiwygEditor(
         source_start: std::cell::Cell<usize>,
         source_end: std::cell::Cell<usize>,
         target_pos: std::cell::Cell<usize>,
-        /// When dragging a checklist item, stores the parent `<ul>` so
+        /// When dragging a list item, stores the parent list element so
         /// drop targets are scoped to siblings within the same list.
         scope_parent: std::cell::Cell<Option<send_wrapper::SendWrapper<web_sys::Element>>>,
     }
@@ -429,9 +429,9 @@ pub fn TreeWysiwygEditor(
                     mount_table_insert_handles_in_container(container_el);
                 }
 
-                // Mount drag handles on checklist items.
+                // Mount drag handles on list items.
                 if enable_block_drag && !readonly {
-                    mount_checklist_drag_handles(
+                    mount_list_drag_handles(
                         container_el,
                         can_drag_for_effect.as_deref(),
                     );
@@ -1108,10 +1108,10 @@ pub fn TreeWysiwygEditor(
             drag_down.source_end.set(end);
             drag_down.target_pos.set(start);
 
-            // If the drag handle is inside a checklist item, scope drop
-            // targets to siblings within the same parent `<ul>`.
-            let scope = target_el.closest(".kode-checklist-item").ok().flatten()
-                .and_then(|li| li.closest(".wysiwyg-task-list").ok().flatten());
+            // If the drag handle is inside a list item, scope drop
+            // targets to siblings within the same parent list.
+            let scope = target_el.closest("li[data-pos-start]").ok().flatten()
+                .and_then(|li| li.closest(".wysiwyg-list").ok().flatten());
             drag_down.scope_parent.set(
                 scope.map(send_wrapper::SendWrapper::new),
             );
@@ -1145,7 +1145,7 @@ pub fn TreeWysiwygEditor(
             let Some(container) = editor_move.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
-            // Determine whether this is a scoped (checklist) or unscoped
+            // Determine whether this is a scoped (list item) or unscoped
             // (extension block) drag. Take the scope_parent out of the Cell
             // temporarily, inspect it, then put it back.
             let scope = drag_move.scope_parent.take();
@@ -1154,11 +1154,11 @@ pub fn TreeWysiwygEditor(
             drag_move.scope_parent.set(scope);
 
             if is_scoped {
-                // ── Scoped drag: checklist item reordering ──────────
+                // ── Scoped drag: list item reordering ──────────
                 let Some(parent_ul) = scope_el else { return };
 
                 let Ok(items) = parent_ul.query_selector_all(
-                    "li.kode-checklist-item[data-pos-start]"
+                    "li[data-pos-start]"
                 ) else { return };
 
                 // Remove any existing drop indicator from the parent list.
@@ -1385,10 +1385,10 @@ pub fn TreeWysiwygEditor(
             }
 
             // FLIP animation: snapshot block positions before move.
-            // For scoped (checklist) drags, snapshot checklist items;
+            // For scoped (list item) drags, snapshot list items;
             // for unscoped drags, snapshot extension blocks.
             let flip_selector = if was_scoped {
-                "li.kode-checklist-item[data-pos-start]"
+                "li.kode-checklist-item[data-pos-start], li.wysiwyg-list-item[data-pos-start]"
             } else {
                 "div.kode-extension-block[data-kode-extension]"
             };
@@ -4508,18 +4508,19 @@ fn mount_drag_handle_on_element(
 // mount_extension_views and mount_drag_handles removed —
 // replaced by patch_segments() which handles both inline.
 
-/// Mount drag handles on all checklist items within a container.
+/// Mount drag handles on all list items within a container.
 ///
-/// Queries for `li.kode-checklist-item[data-pos-start]` and attaches a
-/// drag handle to each, using the ListItem token boundaries (pos_start - 1
-/// for the open token, pos_end + 1 for the close token) so `move_block()`
-/// receives the full ListItem node range.
+/// Queries for `li.kode-checklist-item[data-pos-start]` (task lists) and
+/// `li.wysiwyg-list-item[data-pos-start]` (bullet / ordered lists) and
+/// attaches a drag handle to each, using the ListItem token boundaries
+/// (pos_start - 1 for the open token, pos_end + 1 for the close token) so
+/// `move_block()` receives the full ListItem node range.
 #[cfg(target_arch = "wasm32")]
-fn mount_checklist_drag_handles(
+fn mount_list_drag_handles(
     container: &web_sys::Element,
     can_drag: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
 ) {
-    let Ok(items) = container.query_selector_all("li.kode-checklist-item[data-pos-start]") else {
+    let Ok(items) = container.query_selector_all("li.kode-checklist-item[data-pos-start], li.wysiwyg-list-item[data-pos-start]") else {
         return;
     };
     for i in 0..items.length() {
