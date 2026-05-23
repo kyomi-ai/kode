@@ -141,9 +141,45 @@ pub fn file_block_attrs(
     attrs
 }
 
+/// Returns attributes for a table node with column widths as percentages.
+///
+/// Widths are stored as a comma-separated string (e.g. `"25,25,25,25"`).
+pub fn table_attrs(col_widths: &[f64]) -> Attrs {
+    let mut attrs = SmallVec::new();
+    let widths_str: Vec<String> = col_widths.iter().map(|w| format!("{:.2}", w)).collect();
+    attrs.push((
+        "col_widths".to_string(),
+        AttrValue::String(widths_str.join(",")),
+    ));
+    attrs
+}
+
 /// Looks up an attribute by key, returning a reference to its value if found.
 pub fn get_attr<'a>(attrs: &'a Attrs, key: &str) -> Option<&'a AttrValue> {
     attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
+/// Sets an attribute by key in the given collection. If the key already
+/// exists, the value is replaced; otherwise a new entry is appended.
+pub fn set_attr(attrs: &mut Attrs, key: &str, value: AttrValue) {
+    if let Some(entry) = attrs.iter_mut().find(|(k, _)| k == key) {
+        entry.1 = value;
+    } else {
+        attrs.push((key.to_string(), value));
+    }
+}
+
+/// Parses a `col_widths` attribute string into a vector of f64 percentages.
+///
+/// Returns `None` if the attr is not present or cannot be parsed.
+pub fn parse_col_widths(attrs: &Attrs) -> Option<Vec<f64>> {
+    match get_attr(attrs, "col_widths") {
+        Some(AttrValue::String(s)) if !s.is_empty() => {
+            let widths: Result<Vec<f64>, _> = s.split(',').map(|w| w.trim().parse::<f64>()).collect();
+            widths.ok()
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -288,5 +324,61 @@ mod tests {
             get_attr(&attrs, "content_type"),
             Some(&AttrValue::String("application/pdf".to_string()))
         );
+    }
+
+    #[test]
+    fn table_attrs_stores_col_widths() {
+        let attrs = table_attrs(&[25.0, 50.0, 25.0]);
+        match get_attr(&attrs, "col_widths") {
+            Some(AttrValue::String(s)) => {
+                assert_eq!(s, "25.00,50.00,25.00");
+            }
+            other => panic!("expected String col_widths, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_attr_inserts_new() {
+        let mut attrs = empty_attrs();
+        set_attr(&mut attrs, "foo", AttrValue::String("bar".to_string()));
+        assert_eq!(
+            get_attr(&attrs, "foo"),
+            Some(&AttrValue::String("bar".to_string()))
+        );
+    }
+
+    #[test]
+    fn set_attr_replaces_existing() {
+        let mut attrs = empty_attrs();
+        set_attr(&mut attrs, "foo", AttrValue::String("old".to_string()));
+        set_attr(&mut attrs, "foo", AttrValue::String("new".to_string()));
+        assert_eq!(
+            get_attr(&attrs, "foo"),
+            Some(&AttrValue::String("new".to_string()))
+        );
+        assert_eq!(attrs.len(), 1, "should not duplicate the key");
+    }
+
+    #[test]
+    fn parse_col_widths_valid() {
+        let attrs = table_attrs(&[30.0, 40.0, 30.0]);
+        let widths = parse_col_widths(&attrs).unwrap();
+        assert_eq!(widths.len(), 3);
+        assert!((widths[0] - 30.0).abs() < 0.01);
+        assert!((widths[1] - 40.0).abs() < 0.01);
+        assert!((widths[2] - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_col_widths_missing_returns_none() {
+        let attrs = empty_attrs();
+        assert!(parse_col_widths(&attrs).is_none());
+    }
+
+    #[test]
+    fn parse_col_widths_empty_string_returns_none() {
+        let mut attrs = empty_attrs();
+        attrs.push(("col_widths".to_string(), AttrValue::String(String::new())));
+        assert!(parse_col_widths(&attrs).is_none());
     }
 }

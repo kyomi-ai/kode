@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use kode_doc::attrs::{get_attr, AttrValue};
+use kode_doc::attrs::{get_attr, parse_col_widths, AttrValue};
 use kode_doc::{Fragment, Mark, MarkType, Node, NodeType};
 use leptos::prelude::*;
 use web_sys::MouseEvent;
@@ -301,17 +301,40 @@ pub(crate) fn render_block_node(
 
         // ── Table ────────────────────────────────────────────────────
         NodeType::Table => {
+            let col_widths = parse_col_widths(&node.attrs);
             let rows = render_table_rows(&node.content, content_start);
-            Some(
-                view! {
-                    <table class="wysiwyg-table"
-                        data-pos-start=content_start
-                        data-pos-end=content_end>
-                        {rows}
-                    </table>
-                }
-                .into_any(),
-            )
+
+            if let Some(widths) = col_widths {
+                let cols: Vec<AnyView> = widths
+                    .iter()
+                    .map(|w| {
+                        let style = format!("width: {w:.2}%");
+                        view! { <col style=style /> }.into_any()
+                    })
+                    .collect();
+                Some(
+                    view! {
+                        <table class="wysiwyg-table wysiwyg-table-fixed"
+                            data-pos-start=content_start
+                            data-pos-end=content_end>
+                            <colgroup>{cols}</colgroup>
+                            {rows}
+                        </table>
+                    }
+                    .into_any(),
+                )
+            } else {
+                Some(
+                    view! {
+                        <table class="wysiwyg-table"
+                            data-pos-start=content_start
+                            data-pos-end=content_end>
+                            {rows}
+                        </table>
+                    }
+                    .into_any(),
+                )
+            }
         }
 
         // Table sub-nodes at top level (shouldn't happen outside a table)
@@ -1146,10 +1169,25 @@ fn block_node_to_html(
 
         // ── Table ────────────────────────────────────────────────────
         NodeType::Table => {
-            html.push_str(&format!(
-                "<table class=\"wysiwyg-table\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
-                content_start, content_end
-            ));
+            let col_widths = parse_col_widths(&node.attrs);
+            if col_widths.is_some() {
+                html.push_str(&format!(
+                    "<table class=\"wysiwyg-table wysiwyg-table-fixed\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                    content_start, content_end
+                ));
+            } else {
+                html.push_str(&format!(
+                    "<table class=\"wysiwyg-table\" data-pos-start=\"{}\" data-pos-end=\"{}\">",
+                    content_start, content_end
+                ));
+            }
+            if let Some(ref widths) = col_widths {
+                html.push_str("<colgroup>");
+                for w in widths {
+                    html.push_str(&format!("<col style=\"width: {w:.2}%\">"));
+                }
+                html.push_str("</colgroup>");
+            }
             table_rows_to_html(html, &node.content, content_start);
             html.push_str("</table>");
         }
