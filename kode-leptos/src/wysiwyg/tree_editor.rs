@@ -145,6 +145,9 @@ pub fn TreeWysiwygEditor(
         source_start: std::cell::Cell<usize>,
         source_end: std::cell::Cell<usize>,
         target_pos: std::cell::Cell<usize>,
+        /// When dragging a checklist item, stores the parent `<ul>` so
+        /// drop targets are scoped to siblings within the same list.
+        scope_parent: std::cell::Cell<Option<send_wrapper::SendWrapper<web_sys::Element>>>,
     }
 
     let drag_state = if enable_block_drag && !readonly {
@@ -153,6 +156,7 @@ pub fn TreeWysiwygEditor(
             source_start: std::cell::Cell::new(0),
             source_end: std::cell::Cell::new(0),
             target_pos: std::cell::Cell::new(0),
+            scope_parent: std::cell::Cell::new(None),
         }))
     } else {
         None
@@ -423,6 +427,14 @@ pub fn TreeWysiwygEditor(
                 // Mount table hover controls (add row/column buttons).
                 if !readonly {
                     mount_table_controls_in_container(container_el);
+                }
+
+                // Mount drag handles on checklist items.
+                if enable_block_drag && !readonly {
+                    mount_checklist_drag_handles(
+                        container_el,
+                        can_drag_for_effect.as_deref(),
+                    );
                 }
 
                 // Reconnect the observer after patching.
@@ -1096,6 +1108,14 @@ pub fn TreeWysiwygEditor(
             drag_down.source_end.set(end);
             drag_down.target_pos.set(start);
 
+            // If the drag handle is inside a checklist item, scope drop
+            // targets to siblings within the same parent `<ul>`.
+            let scope = target_el.closest(".kode-checklist-item").ok().flatten()
+                .and_then(|li| li.closest(".wysiwyg-task-list").ok().flatten());
+            drag_down.scope_parent.set(
+                scope.map(send_wrapper::SendWrapper::new),
+            );
+
             // Capture pointer on the handle element.
             let _ = target_el.set_pointer_capture(ev.pointer_id());
 
@@ -1125,93 +1145,181 @@ pub fn TreeWysiwygEditor(
             let Some(container) = editor_move.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
-            // Find all top-level blocks and determine which gap the pointer is in.
-            let Ok(blocks) = container_el.query_selector_all("[data-pos-start]") else { return };
+            // Determine whether this is a scoped (checklist) or unscoped
+            // (extension block) drag. Take the scope_parent out of the Cell
+            // temporarily, inspect it, then put it back.
+            let scope = drag_move.scope_parent.take();
+            let is_scoped = scope.is_some();
+            let scope_el = scope.as_deref().cloned();
+            drag_move.scope_parent.set(scope);
 
-            // Remove any existing drop indicator.
-            if let Ok(Some(old)) = container_el.query_selector(".kode-drop-indicator") {
-                old.remove();
-            }
+            if is_scoped {
+                // ── Scoped drag: checklist item reordering ──────────
+                let Some(parent_ul) = scope_el else { return };
 
-            let mut best_target_pos = 0usize;
-            let mut best_insert_el: Option<web_sys::Element> = None;
-            let mut best_insert_before = true;
-            let mut best_dist = f64::MAX;
-            let source_start = drag_move.source_start.get();
-            let source_end = drag_move.source_end.get();
+                let Ok(items) = parent_ul.query_selector_all(
+                    "li.kode-checklist-item[data-pos-start]"
+                ) else { return };
 
-            for i in 0..blocks.length() {
-                let Some(node) = blocks.item(i) else { continue };
-                let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
-
-                // Find the top-level ancestor of this block (direct child of container).
-                // Blocks may be nested inside grid wrappers (.kode-block-grid > .kode-grid-item).
-                let top_level = find_top_level_ancestor(&el, container_el);
-                let Some(top_el) = top_level else { continue };
-
-                let rect = el.get_bounding_client_rect();
-                let raw_start: usize = el.get_attribute("data-pos-start")
-                    .and_then(|s| s.parse().ok()).unwrap_or(0);
-                let raw_end: usize = el.get_attribute("data-pos-end")
-                    .and_then(|s| s.parse().ok()).unwrap_or(0);
-
-                // Extension blocks and leaf nodes (HR) store block-level
-                // positions; branch blocks (paragraphs, headings, etc.) store
-                // content positions (1 token inside). Adjust content-positioned
-                // blocks to block boundaries so the insert lands between blocks.
-                let uses_block_positions = el.has_attribute("data-kode-extension")
-                    || el.tag_name().eq_ignore_ascii_case("hr");
-                let block_start = if uses_block_positions { raw_start } else { raw_start.saturating_sub(1) };
-                let block_end = if uses_block_positions { raw_end } else { raw_end + 1 };
-
-                // When the block is inside a grid wrapper, the indicator is placed
-                // at the grid boundary, so target_pos must match: use the first
-                // block's start or last block's end within the grid group.
-                let (group_start, group_end) = if top_el != el {
-                    resolve_grid_group_positions(&top_el)
-                        .unwrap_or((block_start, block_end))
-                } else {
-                    (block_start, block_end)
-                };
-
-                let top_dist = (client_y - rect.top()).abs();
-                if top_dist < best_dist {
-                    best_dist = top_dist;
-                    best_target_pos = group_start;
-                    best_insert_el = Some(top_el.clone());
-                    best_insert_before = true;
+                // Remove any existing drop indicator from the parent list.
+                if let Ok(Some(old)) = parent_ul.query_selector(".kode-drop-indicator") {
+                    old.remove();
                 }
 
-                let bottom_dist = (client_y - rect.bottom()).abs();
-                if bottom_dist < best_dist {
-                    best_dist = bottom_dist;
-                    best_target_pos = group_end;
-                    best_insert_el = Some(top_el);
-                    best_insert_before = false;
+                let mut best_target_pos = 0usize;
+                let mut best_insert_el: Option<web_sys::Element> = None;
+                let mut best_insert_before = true;
+                let mut best_dist = f64::MAX;
+                let source_start = drag_move.source_start.get();
+                let source_end = drag_move.source_end.get();
+
+                for i in 0..items.length() {
+                    let Some(node) = items.item(i) else { continue };
+                    let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
+
+                    let rect = el.get_bounding_client_rect();
+                    let raw_start: usize = el.get_attribute("data-pos-start")
+                        .and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let raw_end: usize = el.get_attribute("data-pos-end")
+                        .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+                    // Checklist items store content positions; adjust to
+                    // full ListItem token boundaries for move_block().
+                    let item_start = raw_start.saturating_sub(1);
+                    let item_end = raw_end + 1;
+
+                    let top_dist = (client_y - rect.top()).abs();
+                    if top_dist < best_dist {
+                        best_dist = top_dist;
+                        best_target_pos = item_start;
+                        best_insert_el = Some(el.clone());
+                        best_insert_before = true;
+                    }
+
+                    let bottom_dist = (client_y - rect.bottom()).abs();
+                    if bottom_dist < best_dist {
+                        best_dist = bottom_dist;
+                        best_target_pos = item_end;
+                        best_insert_el = Some(el);
+                        best_insert_before = false;
+                    }
                 }
-            }
 
-            // Don't show indicator if target is within the source block.
-            if best_target_pos >= source_start && best_target_pos <= source_end {
-                drag_move.target_pos.set(source_start);
-                return;
-            }
+                // Don't show indicator if target is within the source block.
+                if best_target_pos >= source_start && best_target_pos <= source_end {
+                    drag_move.target_pos.set(source_start);
+                    return;
+                }
 
-            drag_move.target_pos.set(best_target_pos);
+                drag_move.target_pos.set(best_target_pos);
 
-            // Create and insert the drop indicator.
-            if let Some(ref insert_el) = best_insert_el {
-                let doc = web_sys::window().and_then(|w| w.document());
-                if let Some(doc) = doc {
-                    if let Ok(indicator) = doc.create_element("div") {
-                        let _ = indicator.set_attribute("class", "kode-drop-indicator");
-                        let _ = indicator.set_attribute("contenteditable", "false");
-                        if best_insert_before {
-                            let _ = container_el.insert_before(&indicator, Some(insert_el));
-                        } else if let Some(next) = insert_el.next_element_sibling() {
-                            let _ = container_el.insert_before(&indicator, Some(&next));
-                        } else {
-                            let _ = container_el.append_child(&indicator);
+                // Insert the drop indicator between <li> siblings.
+                if let Some(ref insert_el) = best_insert_el {
+                    let doc = web_sys::window().and_then(|w| w.document());
+                    if let Some(doc) = doc {
+                        if let Ok(indicator) = doc.create_element("div") {
+                            let _ = indicator.set_attribute("class", "kode-drop-indicator");
+                            let _ = indicator.set_attribute("contenteditable", "false");
+                            if best_insert_before {
+                                let _ = parent_ul.insert_before(&indicator, Some(insert_el));
+                            } else if let Some(next) = insert_el.next_element_sibling() {
+                                let _ = parent_ul.insert_before(&indicator, Some(&next));
+                            } else {
+                                let _ = parent_ul.append_child(&indicator);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // ── Unscoped drag: extension block reordering ───────
+                // Find all top-level blocks and determine which gap the pointer is in.
+                let Ok(blocks) = container_el.query_selector_all("[data-pos-start]") else { return };
+
+                // Remove any existing drop indicator.
+                if let Ok(Some(old)) = container_el.query_selector(".kode-drop-indicator") {
+                    old.remove();
+                }
+
+                let mut best_target_pos = 0usize;
+                let mut best_insert_el: Option<web_sys::Element> = None;
+                let mut best_insert_before = true;
+                let mut best_dist = f64::MAX;
+                let source_start = drag_move.source_start.get();
+                let source_end = drag_move.source_end.get();
+
+                for i in 0..blocks.length() {
+                    let Some(node) = blocks.item(i) else { continue };
+                    let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
+
+                    // Find the top-level ancestor of this block (direct child of container).
+                    // Blocks may be nested inside grid wrappers (.kode-block-grid > .kode-grid-item).
+                    let top_level = find_top_level_ancestor(&el, container_el);
+                    let Some(top_el) = top_level else { continue };
+
+                    let rect = el.get_bounding_client_rect();
+                    let raw_start: usize = el.get_attribute("data-pos-start")
+                        .and_then(|s| s.parse().ok()).unwrap_or(0);
+                    let raw_end: usize = el.get_attribute("data-pos-end")
+                        .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+                    // Extension blocks and leaf nodes (HR) store block-level
+                    // positions; branch blocks (paragraphs, headings, etc.) store
+                    // content positions (1 token inside). Adjust content-positioned
+                    // blocks to block boundaries so the insert lands between blocks.
+                    let uses_block_positions = el.has_attribute("data-kode-extension")
+                        || el.tag_name().eq_ignore_ascii_case("hr");
+                    let block_start = if uses_block_positions { raw_start } else { raw_start.saturating_sub(1) };
+                    let block_end = if uses_block_positions { raw_end } else { raw_end + 1 };
+
+                    // When the block is inside a grid wrapper, the indicator is placed
+                    // at the grid boundary, so target_pos must match: use the first
+                    // block's start or last block's end within the grid group.
+                    let (group_start, group_end) = if top_el != el {
+                        resolve_grid_group_positions(&top_el)
+                            .unwrap_or((block_start, block_end))
+                    } else {
+                        (block_start, block_end)
+                    };
+
+                    let top_dist = (client_y - rect.top()).abs();
+                    if top_dist < best_dist {
+                        best_dist = top_dist;
+                        best_target_pos = group_start;
+                        best_insert_el = Some(top_el.clone());
+                        best_insert_before = true;
+                    }
+
+                    let bottom_dist = (client_y - rect.bottom()).abs();
+                    if bottom_dist < best_dist {
+                        best_dist = bottom_dist;
+                        best_target_pos = group_end;
+                        best_insert_el = Some(top_el);
+                        best_insert_before = false;
+                    }
+                }
+
+                // Don't show indicator if target is within the source block.
+                if best_target_pos >= source_start && best_target_pos <= source_end {
+                    drag_move.target_pos.set(source_start);
+                    return;
+                }
+
+                drag_move.target_pos.set(best_target_pos);
+
+                // Create and insert the drop indicator.
+                if let Some(ref insert_el) = best_insert_el {
+                    let doc = web_sys::window().and_then(|w| w.document());
+                    if let Some(doc) = doc {
+                        if let Ok(indicator) = doc.create_element("div") {
+                            let _ = indicator.set_attribute("class", "kode-drop-indicator");
+                            let _ = indicator.set_attribute("contenteditable", "false");
+                            if best_insert_before {
+                                let _ = container_el.insert_before(&indicator, Some(insert_el));
+                            } else if let Some(next) = insert_el.next_element_sibling() {
+                                let _ = container_el.insert_before(&indicator, Some(&next));
+                            } else {
+                                let _ = container_el.append_child(&indicator);
+                            }
                         }
                     }
                 }
@@ -1238,6 +1346,11 @@ pub fn TreeWysiwygEditor(
 
             drag_up.active.set(false);
 
+            // Take scope_parent so we know whether this was a scoped drag,
+            // and clear it for the next drag cycle.
+            let scope = drag_up.scope_parent.take();
+            let was_scoped = scope.is_some();
+
             // Remove dragging classes.
             if let Some(body) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.body()) {
                 let _ = body.class_list().remove_1("kode-dragging");
@@ -1246,7 +1359,8 @@ pub fn TreeWysiwygEditor(
             let Some(container) = editor_up.get_untracked() else { return };
             let container_el: &web_sys::Element = container.as_ref();
 
-            // Remove drop indicator.
+            // Remove drop indicator -- may be in container or inside a scoped
+            // parent list, so search from the container which covers both.
             if let Ok(Some(indicator)) = container_el.query_selector(".kode-drop-indicator") {
                 indicator.remove();
             }
@@ -1270,10 +1384,17 @@ pub fn TreeWysiwygEditor(
                 return;
             }
 
-            // FLIP animation: snapshot extension block positions before move.
+            // FLIP animation: snapshot block positions before move.
+            // For scoped (checklist) drags, snapshot checklist items;
+            // for unscoped drags, snapshot extension blocks.
+            let flip_selector = if was_scoped {
+                "li.kode-checklist-item[data-pos-start]"
+            } else {
+                "div.kode-extension-block[data-kode-extension]"
+            };
             let old_rects: Vec<(String, web_sys::DomRect)> = {
                 let mut rects = Vec::new();
-                if let Ok(all_blocks) = container_el.query_selector_all("div.kode-extension-block[data-kode-extension]") {
+                if let Ok(all_blocks) = container_el.query_selector_all(flip_selector) {
                     for i in 0..all_blocks.length() {
                         if let Some(node) = all_blocks.item(i) {
                             let el: web_sys::Element = node.unchecked_into();
@@ -1302,7 +1423,7 @@ pub fn TreeWysiwygEditor(
                 let Some(container) = editor_flip.get_untracked() else { return };
                 let container_el: &web_sys::Element = container.as_ref();
 
-                let Ok(new_blocks) = container_el.query_selector_all("div.kode-extension-block[data-kode-extension]") else { return };
+                let Ok(new_blocks) = container_el.query_selector_all(flip_selector) else { return };
 
                 for i in 0..new_blocks.length() {
                     let Some(node) = new_blocks.item(i) else { continue };
@@ -1368,6 +1489,8 @@ pub fn TreeWysiwygEditor(
             if !drag_cancel.active.get() { return; }
 
             drag_cancel.active.set(false);
+            // Clear scope_parent for next drag cycle.
+            drag_cancel.scope_parent.set(None);
 
             if let Some(body) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.body()) {
                 let _ = body.class_list().remove_1("kode-dragging");
@@ -4181,6 +4304,37 @@ fn mount_drag_handle_on_element(
 
 // mount_extension_views and mount_drag_handles removed —
 // replaced by patch_segments() which handles both inline.
+
+/// Mount drag handles on all checklist items within a container.
+///
+/// Queries for `li.kode-checklist-item[data-pos-start]` and attaches a
+/// drag handle to each, using the ListItem token boundaries (pos_start - 1
+/// for the open token, pos_end + 1 for the close token) so `move_block()`
+/// receives the full ListItem node range.
+#[cfg(target_arch = "wasm32")]
+fn mount_checklist_drag_handles(
+    container: &web_sys::Element,
+    can_drag: Option<&(dyn Fn(usize, usize) -> bool + Send + Sync)>,
+) {
+    let Ok(items) = container.query_selector_all("li.kode-checklist-item[data-pos-start]") else {
+        return;
+    };
+    for i in 0..items.length() {
+        let Some(node) = items.item(i) else { continue };
+        let Ok(el) = node.dyn_into::<web_sys::Element>() else { continue };
+
+        let raw_start: usize = el.get_attribute("data-pos-start")
+            .and_then(|s| s.parse().ok()).unwrap_or(0);
+        let raw_end: usize = el.get_attribute("data-pos-end")
+            .and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        // Adjust from content positions to full ListItem token boundaries.
+        let item_start = raw_start.saturating_sub(1);
+        let item_end = raw_end + 1;
+
+        mount_drag_handle_on_element(&el, item_start, item_end, can_drag);
+    }
+}
 
 /// Mount hover "+" controls on a table element for adding rows and columns.
 ///

@@ -754,6 +754,16 @@ body.kode-dragging * {
     cursor: grabbing !important;
 }
 
+/* Checklist item drag handles — positioned tighter than extension blocks
+ * because list items have less horizontal padding. */
+.kode-checklist-item > .kode-drag-handle {
+    left: var(--kode-checklist-drag-handle-left, -24px);
+}
+
+.kode-checklist-item:hover > .kode-drag-handle {
+    opacity: 1;
+}
+
 /* ── Slash Command Menu ────────────────────────────────────────────── */
 
 .kode-slash-menu {
