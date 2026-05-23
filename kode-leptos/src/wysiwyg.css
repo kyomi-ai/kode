@@ -277,6 +277,45 @@
     list-style-type: square;
 }
 
+/* ── Task list / Checklist ────────────────────────────────────────── */
+
+.wysiwyg-task-list {
+    list-style: none;
+    padding-left: var(--kode-task-list-padding-left, 0.25em);
+}
+
+.kode-checklist-item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--kode-checkbox-gap, 0.5em);
+    margin: var(--kode-checklist-item-margin, 0.25em 0);
+}
+
+/* Unwrap the Leptos <span> wrapper so the <input> becomes a direct
+ * flex child without introducing an extra box. The drag handle is a
+ * <div>, so this only targets the Leptos wrapper. */
+.kode-checklist-item > span {
+    display: contents;
+}
+
+.kode-checkbox {
+    width: var(--kode-checkbox-size, 1em);
+    height: var(--kode-checkbox-size, 1em);
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--kode-checkbox-accent, var(--kode-accent));
+}
+
+.wysiwyg-readonly .kode-checkbox {
+    cursor: default;
+}
+
+.kode-checklist-item:has(.kode-checkbox-checked) {
+    opacity: var(--kode-checkbox-checked-opacity, 1);
+    text-decoration: var(--kode-checkbox-checked-text-decoration, none);
+}
+
 /* ── Blockquote ────────────────────────────────────────────────────── */
 
 .wysiwyg-blockquote {
