@@ -1000,7 +1000,7 @@ body.kode-dragging * {
     font-family: var(--kode-content-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 }
 
-/* ── Table Hover Controls ────────────────────────────────────────── */
+/* ── Table Insert Handles ────────────────────────────────────────── */
 
 .kode-table-wrapper {
     position: relative;
@@ -1008,57 +1008,143 @@ body.kode-dragging * {
     width: 100%;
 }
 
-.kode-table-add-row-btn,
-.kode-table-add-col-btn {
+/* ── Row insert handles ─────────────────────────────────────────── */
+
+.kode-table-row-insert {
     position: absolute;
+    left: 0;
+    right: 0;
+    height: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 0.15s;
+    /* Extend click target above/below the thin line. */
+    padding: 6px 0;
+    margin-top: -8px;
+    box-sizing: content-box;
+    font-size: 0;
+    color: transparent;
+}
+
+.kode-table-row-insert::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--kode-table-control-border, var(--kode-border));
+    border-radius: 1px;
+    transition: background 0.15s, height 0.15s;
+}
+
+.kode-table-row-insert::after {
+    content: "+";
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
     background: var(--kode-table-control-bg, var(--kode-bg));
     border: 1px solid var(--kode-table-control-border, var(--kode-border));
     color: var(--kode-table-control-color, var(--kode-fg-dim));
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-    font-size: 16px;
-    font-weight: 500;
-    user-select: none;
-    z-index: 5;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.kode-table-wrapper:hover > .kode-table-add-row-btn,
-.kode-table-wrapper:hover > .kode-table-add-col-btn,
-.kode-table-add-row-btn:hover,
-.kode-table-add-col-btn:hover {
+.kode-table-wrapper:hover > .kode-table-row-insert {
     opacity: 1;
 }
 
-.kode-table-add-row-btn:hover,
-.kode-table-add-col-btn:hover {
+.kode-table-row-insert:hover::before {
+    background: var(--kode-table-control-hover-bg, var(--kode-accent));
+    height: 2px;
+}
+
+.kode-table-row-insert:hover::after {
     background: var(--kode-table-control-hover-bg, var(--kode-accent));
     color: var(--kode-table-control-hover-color, var(--kode-bg));
     border-color: var(--kode-table-control-hover-border, var(--kode-accent));
 }
 
-.kode-table-add-row-btn {
-    bottom: -14px;
-    left: 0;
-    right: 0;
-    height: 14px;
-    border-radius: 0 0 4px 4px;
+/* ── Column insert handles ──────────────────────────────────────── */
+
+.kode-table-col-insert {
+    position: absolute;
+    width: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 0.15s;
+    /* Extend click target left/right of the thin line. */
+    padding: 0 6px;
+    margin-left: -8px;
+    box-sizing: content-box;
+    font-size: 0;
+    color: transparent;
 }
 
-.kode-table-add-col-btn {
+.kode-table-col-insert::before {
+    content: "";
+    position: absolute;
     top: 0;
     bottom: 0;
-    right: -14px;
-    width: 14px;
-    border-radius: 0 4px 4px 0;
+    width: 2px;
+    background: var(--kode-table-control-border, var(--kode-border));
+    border-radius: 1px;
+    transition: background 0.15s, width 0.15s;
 }
 
-/* Hide table controls in readonly mode */
-.wysiwyg-readonly .kode-table-add-row-btn,
-.wysiwyg-readonly .kode-table-add-col-btn {
+.kode-table-col-insert::after {
+    content: "+";
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--kode-table-control-bg, var(--kode-bg));
+    border: 1px solid var(--kode-table-control-border, var(--kode-border));
+    color: var(--kode-table-control-color, var(--kode-fg-dim));
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.kode-table-wrapper:hover > .kode-table-col-insert {
+    opacity: 1;
+}
+
+.kode-table-col-insert:hover::before {
+    background: var(--kode-table-control-hover-bg, var(--kode-accent));
+    width: 2px;
+}
+
+.kode-table-col-insert:hover::after {
+    background: var(--kode-table-control-hover-bg, var(--kode-accent));
+    color: var(--kode-table-control-hover-color, var(--kode-bg));
+    border-color: var(--kode-table-control-hover-border, var(--kode-accent));
+}
+
+/* Hide table insert handles in readonly mode */
+.wysiwyg-readonly .kode-table-row-insert,
+.wysiwyg-readonly .kode-table-col-insert {
     display: none;
 }
 

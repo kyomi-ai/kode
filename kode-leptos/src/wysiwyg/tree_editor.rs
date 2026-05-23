@@ -424,9 +424,9 @@ pub fn TreeWysiwygEditor(
                 );
                 *old = new_segs;
 
-                // Mount table hover controls (add row/column buttons).
+                // Mount per-gap table insert handles (add row/column).
                 if !readonly {
-                    mount_table_controls_in_container(container_el);
+                    mount_table_insert_handles_in_container(container_el);
                 }
 
                 // Mount drag handles on checklist items.
@@ -2731,12 +2731,12 @@ pub fn TreeWysiwygEditor(
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
 
         // Prevent focus loss when mousedown lands on the copy button,
-        // table add controls, or cursor placement when Ctrl/Cmd+clicking a link.
+        // table insert handles, or cursor placement when Ctrl/Cmd+clicking a link.
         let mut walk = Some(target_el.clone());
         while let Some(ref current) = walk {
             if current.class_list().contains("wysiwyg-code-copy")
-                || current.class_list().contains("kode-table-add-row-btn")
-                || current.class_list().contains("kode-table-add-col-btn")
+                || current.class_list().contains("kode-table-row-insert")
+                || current.class_list().contains("kode-table-col-insert")
             {
                 ev.prevent_default();
                 return;
@@ -2907,19 +2907,19 @@ pub fn TreeWysiwygEditor(
                     let mut delete_btn: Option<web_sys::Element> = None;
                     let mut attachment_block: Option<web_sys::Element> = None;
                     let mut link_el: Option<web_sys::Element> = None;
-                    let mut table_add_row: Option<web_sys::Element> = None;
-                    let mut table_add_col: Option<web_sys::Element> = None;
+                    let mut table_row_insert: Option<web_sys::Element> = None;
+                    let mut table_col_insert: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
                         if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
                             break;
                         }
-                        if current.class_list().contains("kode-table-add-row-btn") {
-                            table_add_row = Some(current.clone());
+                        if current.class_list().contains("kode-table-row-insert") {
+                            table_row_insert = Some(current.clone());
                             break;
                         }
-                        if current.class_list().contains("kode-table-add-col-btn") {
-                            table_add_col = Some(current.clone());
+                        if current.class_list().contains("kode-table-col-insert") {
+                            table_col_insert = Some(current.clone());
                             break;
                         }
                         if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
@@ -2944,48 +2944,49 @@ pub fn TreeWysiwygEditor(
                         el = current.parent_element();
                     }
 
-                    // ── Table add-row button ────────────────────────────────
-                    if let Some(ref btn) = table_add_row {
+                    // ── Table row insert handle ─────────────────────────────
+                    if let Some(ref handle) = table_row_insert {
                         if readonly { return; }
                         ev.prevent_default();
                         ev.stop_propagation();
-                        // Button is a sibling of the table inside .kode-table-wrapper
-                        if let Some(wrapper) = btn.closest(".kode-table-wrapper").ok().flatten() {
-                            if let Some(table) = wrapper.query_selector("table.wysiwyg-table").ok().flatten() {
-                                if let Some(pos) = find_last_cell_pos(&table) {
-                                    let Ok(mut ds) = doc_state_click.lock() else { return };
-                                    ds.set_selection(Selection::cursor(pos));
-                                    ds.insert_row_below();
-                                    let md = ds.to_markdown();
-                                    drop(ds);
-                                    version.update(|v| *v += 1);
-                                    if let Some(ref cb) = on_change_click {
-                                        cb(md);
-                                    }
+                        if let Some(pos_str) = handle.get_attribute("data-cell-pos") {
+                            if let Ok(pos) = pos_str.parse::<usize>() {
+                                let Ok(mut ds) = doc_state_click.lock() else { return };
+                                ds.set_selection(Selection::cursor(pos));
+                                ds.insert_row_below();
+                                let md = ds.to_markdown();
+                                drop(ds);
+                                version.update(|v| *v += 1);
+                                if let Some(ref cb) = on_change_click {
+                                    cb(md);
                                 }
                             }
                         }
                         return;
                     }
 
-                    // ── Table add-column button ─────────────────────────────
-                    if let Some(ref btn) = table_add_col {
+                    // ── Table column insert handle ─────────────────────────
+                    if let Some(ref handle) = table_col_insert {
                         if readonly { return; }
                         ev.prevent_default();
                         ev.stop_propagation();
-                        // Button is a sibling of the table inside .kode-table-wrapper
-                        if let Some(wrapper) = btn.closest(".kode-table-wrapper").ok().flatten() {
-                            if let Some(table) = wrapper.query_selector("table.wysiwyg-table").ok().flatten() {
-                                if let Some(pos) = find_last_cell_pos(&table) {
-                                    let Ok(mut ds) = doc_state_click.lock() else { return };
-                                    ds.set_selection(Selection::cursor(pos));
+                        if let Some(pos_str) = handle.get_attribute("data-cell-pos") {
+                            if let Ok(pos) = pos_str.parse::<usize>() {
+                                let Ok(mut ds) = doc_state_click.lock() else { return };
+                                ds.set_selection(Selection::cursor(pos));
+                                let is_left = handle
+                                    .get_attribute("data-insert-side")
+                                    .is_some_and(|s| s == "left");
+                                if is_left {
+                                    ds.insert_column_left();
+                                } else {
                                     ds.insert_column_right();
-                                    let md = ds.to_markdown();
-                                    drop(ds);
-                                    version.update(|v| *v += 1);
-                                    if let Some(ref cb) = on_change_click {
-                                        cb(md);
-                                    }
+                                }
+                                let md = ds.to_markdown();
+                                drop(ds);
+                                version.update(|v| *v += 1);
+                                if let Some(ref cb) = on_change_click {
+                                    cb(md);
                                 }
                             }
                         }
@@ -4336,69 +4337,156 @@ fn mount_checklist_drag_handles(
     }
 }
 
-/// Mount hover "+" controls on a table element for adding rows and columns.
+/// Mount per-gap insert handles on a table element for adding rows and columns.
 ///
 /// Wraps the table in a `kode-table-wrapper` div with `position: relative`,
-/// since `<div>` elements are not valid children of `<table>`. The buttons
-/// are appended as siblings of the table inside the wrapper.
+/// then positions thin `+` handles at every row boundary and column boundary.
+/// Each handle carries `data-cell-pos` so the click handler can set the cursor
+/// into the correct row/column before calling insert operations.
 ///
 /// Idempotent — skips if the wrapper is already present.
 #[cfg(target_arch = "wasm32")]
-fn mount_table_controls(table: &web_sys::Element) {
-    // Check if already wrapped.
-    if let Some(parent) = table.parent_element() {
+fn mount_table_insert_handles(table: &web_sys::Element) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+
+    // If the table is already wrapped, reuse the wrapper but clear stale handles.
+    let wrapper = if let Some(parent) = table.parent_element() {
         if parent.class_list().contains("kode-table-wrapper") {
-            return;
+            // Remove old row and column insert handles.
+            let selectors = ".kode-table-row-insert, .kode-table-col-insert";
+            if let Ok(old_handles) = parent.query_selector_all(selectors) {
+                for i in 0..old_handles.length() {
+                    if let Some(h) = old_handles.item(i) {
+                        h.unchecked_ref::<web_sys::Element>().remove();
+                    }
+                }
+            }
+            parent
+        } else {
+            // First mount: create wrapper.
+            let Some(parent_node) = table.parent_node() else { return };
+            let Ok(w) = doc.create_element("div") else { return };
+            let _ = w.set_attribute("class", "kode-table-wrapper");
+            let _ = parent_node.insert_before(&w, Some(table));
+            let _ = w.append_child(table);
+            w
+        }
+    } else {
+        return;
+    };
+
+    // ── Row insert handles ─────────────────────────────────────────
+    // One handle below each row, positioned at the row's bottom edge.
+    let rows = table.query_selector_all("tr.wysiwyg-table-row");
+    if let Ok(rows) = rows {
+        let wrapper_rect = wrapper.get_bounding_client_rect();
+        for i in 0..rows.length() {
+            let Some(row_node) = rows.item(i) else { continue };
+            let Some(row_el) = row_node.dyn_ref::<web_sys::Element>() else { continue };
+            let row_rect = row_el.get_bounding_client_rect();
+
+            // Find any cell in this row to get a cursor position.
+            let cell_pos = row_el
+                .query_selector("td[data-pos-start], th[data-pos-start]")
+                .ok()
+                .flatten()
+                .and_then(|cell| cell.get_attribute("data-pos-start"));
+
+            let Some(pos_str) = cell_pos else { continue };
+
+            let Ok(handle) = doc.create_element("div") else { continue };
+            let _ = handle.set_attribute("class", "kode-table-row-insert");
+            let _ = handle.set_attribute("contenteditable", "false");
+            let _ = handle.set_attribute("data-insert-after-row", &i.to_string());
+            let _ = handle.set_attribute("data-cell-pos", &pos_str);
+            handle.set_inner_html("+");
+
+            // Position at the bottom edge of this row, relative to wrapper.
+            let top = row_rect.bottom() - wrapper_rect.top();
+            if let Some(html) = handle.dyn_ref::<HtmlElement>() {
+                let _ = html.style().set_property("top", &format!("{top}px"));
+            }
+
+            let _ = wrapper.append_child(&handle);
         }
     }
 
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Some(parent) = table.parent_node() else { return };
+    // ── Column insert handles ──────────────────────────────────────
+    // One handle at each column boundary (left edge of first col, between
+    // every pair of adjacent cols, right edge of last col).
+    let header_cells = table.query_selector_all("thead th.wysiwyg-table-cell");
+    if let Ok(cells) = header_cells {
+        let count = cells.length();
+        if count > 0 {
+            let wrapper_rect = wrapper.get_bounding_client_rect();
 
-    // Create wrapper div — inherits contenteditable from the scroll container.
-    let Ok(wrapper) = doc.create_element("div") else { return };
-    let _ = wrapper.set_attribute("class", "kode-table-wrapper");
+            // Collect cell rects and pos-start values.
+            let mut cell_infos: Vec<(web_sys::DomRect, String)> = Vec::new();
+            for j in 0..count {
+                let Some(cell_node) = cells.item(j) else { continue };
+                let Some(cell_el) = cell_node.dyn_ref::<web_sys::Element>() else { continue };
+                let Some(pos) = cell_el.get_attribute("data-pos-start") else { continue };
+                let rect = cell_el.get_bounding_client_rect();
+                cell_infos.push((rect, pos));
+            }
 
-    // Insert wrapper before the table, then move the table inside.
-    let _ = parent.insert_before(&wrapper, Some(table));
-    let _ = wrapper.append_child(table);
+            // Handle height: from table top to table bottom.
+            let table_rect = table.get_bounding_client_rect();
+            let handle_top = table_rect.top() - wrapper_rect.top();
+            let handle_height = table_rect.height();
 
-    // "+" button below table (add row)
-    if let Ok(row_btn) = doc.create_element("div") {
-        let _ = row_btn.set_attribute("class", "kode-table-add-row-btn");
-        let _ = row_btn.set_attribute("contenteditable", "false");
-        row_btn.set_inner_html("+");
-        let _ = wrapper.append_child(&row_btn);
-    }
+            // Left-edge handle (insert before column 0).
+            if let Some((ref first_rect, ref first_pos)) = cell_infos.first() {
+                let left = first_rect.left() - wrapper_rect.left();
+                if let Ok(handle) = doc.create_element("div") {
+                    let _ = handle.set_attribute("class", "kode-table-col-insert");
+                    let _ = handle.set_attribute("contenteditable", "false");
+                    let _ = handle.set_attribute("data-insert-col-index", "0");
+                    let _ = handle.set_attribute("data-cell-pos", first_pos);
+                    let _ = handle.set_attribute("data-insert-side", "left");
+                    handle.set_inner_html("+");
 
-    // "+" button right of table (add column)
-    if let Ok(col_btn) = doc.create_element("div") {
-        let _ = col_btn.set_attribute("class", "kode-table-add-col-btn");
-        let _ = col_btn.set_attribute("contenteditable", "false");
-        col_btn.set_inner_html("+");
-        let _ = wrapper.append_child(&col_btn);
+                    if let Some(html) = handle.dyn_ref::<HtmlElement>() {
+                        let _ = html.style().set_property("left", &format!("{left}px"));
+                        let _ = html.style().set_property("top", &format!("{handle_top}px"));
+                        let _ = html.style().set_property("height", &format!("{handle_height}px"));
+                    }
+                    let _ = wrapper.append_child(&handle);
+                }
+            }
+
+            // Handles between columns and at the right edge.
+            for j in 0..cell_infos.len() {
+                let (ref rect, ref pos) = cell_infos[j];
+                let left = rect.right() - wrapper_rect.left();
+                let col_index = j + 1;
+
+                let Ok(handle) = doc.create_element("div") else { continue };
+                let _ = handle.set_attribute("class", "kode-table-col-insert");
+                let _ = handle.set_attribute("contenteditable", "false");
+                let _ = handle.set_attribute("data-insert-col-index", &col_index.to_string());
+                let _ = handle.set_attribute("data-cell-pos", pos);
+                handle.set_inner_html("+");
+
+                if let Some(html) = handle.dyn_ref::<HtmlElement>() {
+                    let _ = html.style().set_property("left", &format!("{left}px"));
+                    let _ = html.style().set_property("top", &format!("{handle_top}px"));
+                    let _ = html.style().set_property("height", &format!("{handle_height}px"));
+                }
+                let _ = wrapper.append_child(&handle);
+            }
+        }
     }
 }
 
-/// Find a cursor position inside the last cell of a table element.
-/// Returns `data-pos-start` of the last `td` or `th` cell found in the DOM,
-/// which places the cursor at the beginning of that cell's content.
-fn find_last_cell_pos(table: &web_sys::Element) -> Option<usize> {
-    let cells = table.query_selector_all("td, th").ok()?;
-    let count = cells.length();
-    if count == 0 { return None; }
-    let last_cell: web_sys::Element = cells.item(count - 1)?.unchecked_into();
-    last_cell.get_attribute("data-pos-start")?.parse::<usize>().ok()
-}
-
-/// Mount table controls on all table elements within a container.
+/// Mount table insert handles on all table elements within a container.
 #[cfg(target_arch = "wasm32")]
-fn mount_table_controls_in_container(container: &web_sys::Element) {
+fn mount_table_insert_handles_in_container(container: &web_sys::Element) {
     if let Ok(tables) = container.query_selector_all("table.wysiwyg-table") {
         for i in 0..tables.length() {
             if let Some(table) = tables.item(i) {
                 if let Some(el) = table.dyn_ref::<web_sys::Element>() {
-                    mount_table_controls(el);
+                    mount_table_insert_handles(el);
                 }
             }
         }
