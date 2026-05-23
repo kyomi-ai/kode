@@ -236,7 +236,7 @@ pub fn default_toolbar_items() -> Vec<ToolbarItem> {
 
 pub enum SlashMenuItem {
     Builtin { button: BuiltinButton, label: &'static str, description: &'static str },
-    Extension { label: String, description: String, ext_index: usize },
+    Extension { label: String, description: String, ext_index: usize, icon_svg: Option<String> },
 }
 
 pub fn default_slash_menu_items() -> Vec<SlashMenuItem> {

@@ -36,6 +36,9 @@ pub struct ExtensionToolbarItem {
     pub action: Arc<dyn Fn(&mut MarkdownEditor) + Send + Sync>,
     /// Name used for active state matching (matched against `active_state` output).
     pub active_name: Option<String>,
+    /// Optional SVG markup for the slash command menu icon slot.
+    /// When `Some`, the SVG is rendered as the icon; when `None`, the label text is used.
+    pub icon_svg: Option<String>,
 }
 
 /// A keyboard shortcut contributed by an extension.

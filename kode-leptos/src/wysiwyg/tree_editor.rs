@@ -202,6 +202,7 @@ pub fn TreeWysiwygEditor(
                 label: ext_item.title.clone(),
                 description: ext_item.description.clone(),
                 ext_index: i,
+                icon_svg: ext_item.icon_svg.clone(),
             });
         }
         items
@@ -2310,8 +2311,8 @@ pub fn TreeWysiwygEditor(
                     label.to_string(),
                     description.to_string(),
                 ),
-                SlashMenuItem::Extension { label, description, .. } => (
-                    None, label.clone(), label.clone(), description.clone(),
+                SlashMenuItem::Extension { label, description, icon_svg, .. } => (
+                    icon_svg.clone(), label.clone(), label.clone(), description.clone(),
                 ),
             };
             let doc_click = doc_state.clone();
