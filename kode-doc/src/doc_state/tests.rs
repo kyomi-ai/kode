@@ -4624,3 +4624,154 @@ mod task_list_tests {
         );
     }
 }
+
+mod column_width_tests {
+    use crate::attrs::parse_col_widths;
+    use crate::doc_state::*;
+
+    const TABLE_MD: &str = "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |";
+
+    #[test]
+    fn set_column_widths_stores_on_table() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        // Place cursor in the first data cell.
+        ds.set_selection(Selection::cursor(14));
+
+        ds.set_column_widths(vec![30.0, 40.0, 30.0]);
+
+        let table = ds.doc.child(0);
+        let widths = parse_col_widths(&table.attrs);
+        assert!(widths.is_some(), "table should have col_widths attr");
+        let widths = widths.unwrap();
+        assert_eq!(widths.len(), 3);
+        assert!((widths[0] - 30.0).abs() < 0.01);
+        assert!((widths[1] - 40.0).abs() < 0.01);
+        assert!((widths[2] - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn set_column_widths_wrong_count_is_noop() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        // 2 widths for a 3-column table should be a no-op.
+        ds.set_column_widths(vec![50.0, 50.0]);
+
+        let table = ds.doc.child(0);
+        let widths = parse_col_widths(&table.attrs);
+        assert!(widths.is_none(), "should not store widths with wrong count");
+    }
+
+    #[test]
+    fn set_column_widths_is_undoable() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        ds.set_column_widths(vec![30.0, 40.0, 30.0]);
+
+        // Verify widths are set.
+        assert!(parse_col_widths(&ds.doc.child(0).attrs).is_some());
+
+        // Undo should restore original table without widths.
+        assert!(ds.undo());
+        assert!(parse_col_widths(&ds.doc.child(0).attrs).is_none());
+    }
+
+    #[test]
+    fn insert_column_maintains_widths() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        // Set initial widths.
+        ds.set_column_widths(vec![30.0, 40.0, 30.0]);
+
+        // Insert a column to the right of the first column (col_index=0).
+        // Cursor is in first data cell. insert_column_right splits col 0's
+        // width (30) into two (15, 15).
+        ds.insert_column_right();
+
+        let table = ds.doc.child(0);
+        let widths = parse_col_widths(&table.attrs);
+        assert!(widths.is_some(), "widths should be preserved after insert");
+        let widths = widths.unwrap();
+        assert_eq!(widths.len(), 4, "should have 4 columns after insert");
+        // Column 0 was split: 30 / 2 = 15 each.
+        assert!((widths[0] - 15.0).abs() < 0.01, "got {}", widths[0]);
+        assert!((widths[1] - 15.0).abs() < 0.01, "got {}", widths[1]);
+        // Other columns unchanged.
+        assert!((widths[2] - 40.0).abs() < 0.01, "got {}", widths[2]);
+        assert!((widths[3] - 30.0).abs() < 0.01, "got {}", widths[3]);
+    }
+
+    #[test]
+    fn delete_column_redistributes_widths() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        // Set initial widths.
+        ds.set_column_widths(vec![30.0, 40.0, 30.0]);
+
+        // Delete the middle column (index 1, width 40).
+        // We need the cursor in the middle column.
+        // Table positions: header cells at 3(A), 6(B), 9(C).
+        // Data row cells at 14(1), 17(2), 20(3). Let's move to cell "2".
+        ds.set_selection(Selection::cursor(17));
+        ds.delete_column();
+
+        let table = ds.doc.child(0);
+        let widths = parse_col_widths(&table.attrs);
+        assert!(widths.is_some(), "widths should be preserved after delete");
+        let widths = widths.unwrap();
+        assert_eq!(widths.len(), 2, "should have 2 columns after delete");
+        // Deleted column's width (40) redistributed to neighbor.
+        // col_index was 1, after removal neighbor is min(1, len-1) = 1,
+        // so widths[1] (originally 30) gets +40 = 70.
+        assert!((widths[0] - 30.0).abs() < 0.01, "got {}", widths[0]);
+        assert!((widths[1] - 70.0).abs() < 0.01, "got {}", widths[1]);
+    }
+
+    #[test]
+    fn table_without_widths_unaffected_by_insert() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        // No widths set — insert column should work without adding widths.
+        ds.insert_column_right();
+
+        let table = ds.doc.child(0);
+        assert!(
+            parse_col_widths(&table.attrs).is_none(),
+            "table without initial widths should not gain widths on insert"
+        );
+    }
+
+    #[test]
+    fn set_column_widths_at_stores_on_table() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+
+        // table content starts at position 1 (Doc > Table, content_start = 0 + 1 = 1).
+        ds.set_column_widths_at(1, vec![20.0, 50.0, 30.0]);
+
+        let table = ds.doc.child(0);
+        let widths = parse_col_widths(&table.attrs);
+        assert!(widths.is_some(), "table should have col_widths attr");
+        let widths = widths.unwrap();
+        assert_eq!(widths.len(), 3);
+        assert!((widths[0] - 20.0).abs() < 0.01);
+        assert!((widths[1] - 50.0).abs() < 0.01);
+        assert!((widths[2] - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn existing_table_content_preserved_after_set_widths() {
+        let mut ds = DocState::from_markdown(TABLE_MD);
+        ds.set_selection(Selection::cursor(14));
+
+        ds.set_column_widths(vec![30.0, 40.0, 30.0]);
+
+        // Verify the table content is unchanged.
+        let md = ds.to_markdown();
+        assert!(md.contains("| A |"), "header preserved, got: {md}");
+        assert!(md.contains("| 1 |"), "data preserved, got: {md}");
+    }
+}

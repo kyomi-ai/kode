@@ -1,5 +1,6 @@
 //! Editing operations: insert, delete, split, and join.
 
+use crate::attrs::{parse_col_widths, set_attr, AttrValue};
 use crate::fragment::Fragment;
 use crate::node::Node;
 use crate::node_type::NodeType;
@@ -1110,7 +1111,29 @@ impl DocState {
             new_rows.push(Node::branch(row.node_type, Fragment::from_vec(new_cells)));
         }
 
-        let new_table = Node::branch(NodeType::Table, Fragment::from_vec(new_rows));
+        // Maintain column widths: split width from the donor column.
+        let new_attrs = if let Some(mut widths) = parse_col_widths(&table.attrs) {
+            // Donor column: the column that the new column is being inserted
+            // next to. For "insert left" (offset=0) it's col_index, for
+            // "insert right" (offset=1) it's also col_index.
+            let donor_idx = ctx.col_index.min(widths.len().saturating_sub(1));
+            let donor_width = widths[donor_idx];
+            let half = donor_width / 2.0;
+            widths[donor_idx] = half;
+            widths.insert(insert_col, half);
+            let widths_str: Vec<String> = widths.iter().map(|w| format!("{w:.2}")).collect();
+            let mut attrs = table.attrs.clone();
+            set_attr(
+                &mut attrs,
+                "col_widths",
+                AttrValue::String(widths_str.join(",")),
+            );
+            attrs
+        } else {
+            table.attrs.clone()
+        };
+
+        let new_table = Node::branch_with_attrs(NodeType::Table, new_attrs, Fragment::from_vec(new_rows));
         let table_start = resolved.before(ctx.table_depth);
         let table_end = resolved.after(ctx.table_depth);
 
@@ -1178,7 +1201,31 @@ impl DocState {
         let new_col_count = new_rows.first().map_or(0, |r| r.child_count());
         let clamped_col = ctx.col_index.min(new_col_count.saturating_sub(1));
 
-        let new_table = Node::branch(NodeType::Table, Fragment::from_vec(new_rows));
+        // Maintain column widths: redistribute deleted column's width.
+        let new_attrs = if let Some(mut widths) = parse_col_widths(&table.attrs) {
+            if ctx.col_index < widths.len() {
+                let removed_width = widths.remove(ctx.col_index);
+                // Distribute to the nearest neighbor.
+                if !widths.is_empty() {
+                    let neighbor = ctx.col_index.min(widths.len() - 1);
+                    widths[neighbor] += removed_width;
+                }
+                let widths_str: Vec<String> = widths.iter().map(|w| format!("{w:.2}")).collect();
+                let mut attrs = table.attrs.clone();
+                set_attr(
+                    &mut attrs,
+                    "col_widths",
+                    AttrValue::String(widths_str.join(",")),
+                );
+                attrs
+            } else {
+                table.attrs.clone()
+            }
+        } else {
+            table.attrs.clone()
+        };
+
+        let new_table = Node::branch_with_attrs(NodeType::Table, new_attrs, Fragment::from_vec(new_rows));
         let table_start = resolved.before(ctx.table_depth);
         let table_end = resolved.after(ctx.table_depth);
 
@@ -1234,5 +1281,87 @@ impl DocState {
             self.selection = Selection::cursor(table_start.min(max));
             self.redo_stack.clear();
         }
+    }
+
+    /// Set column widths on the table containing the cursor.
+    ///
+    /// `widths` is a vector of percentages that must sum to ~100 and have
+    /// one entry per column. The table node's `col_widths` attribute is set
+    /// to a comma-separated string of those percentages.
+    ///
+    /// No-op if the cursor is not inside a table or the width count does
+    /// not match the column count.
+    pub fn set_column_widths(&mut self, widths: Vec<f64>) {
+        let ctx = match self.find_table_context() {
+            Some(c) => c,
+            None => return,
+        };
+        let resolved = self.doc.resolve(self.selection.head);
+        self.apply_col_widths(&resolved, ctx.table_depth, widths);
+    }
+
+    /// Set column widths on the table identified by its document position.
+    ///
+    /// Unlike `set_column_widths()` which uses the cursor, this method takes
+    /// a position inside the table and does not require the cursor to be in
+    /// the table. Used by the resize drag handler on mouseup.
+    pub fn set_column_widths_at(&mut self, table_content_start: usize, widths: Vec<f64>) {
+        if table_content_start == 0 {
+            return;
+        }
+        let resolved = self.doc.resolve(table_content_start);
+        let Some(table_depth) = (0..=resolved.depth)
+            .rev()
+            .find(|&d| resolved.node(d).node_type == NodeType::Table)
+        else {
+            return;
+        };
+        self.apply_col_widths(&resolved, table_depth, widths);
+    }
+
+    fn apply_col_widths(
+        &mut self,
+        resolved: &crate::position::ResolvedPos,
+        table_depth: usize,
+        widths: Vec<f64>,
+    ) {
+        let table = resolved.node(table_depth);
+        let col_count = table.child(0).child_count();
+        if widths.len() != col_count {
+            return;
+        }
+
+        let mut new_attrs = table.attrs.clone();
+        let widths_str: Vec<String> = widths.iter().map(|w| format!("{w:.2}")).collect();
+        set_attr(
+            &mut new_attrs,
+            "col_widths",
+            AttrValue::String(widths_str.join(",")),
+        );
+
+        let new_table = Node::branch_with_attrs(
+            NodeType::Table,
+            new_attrs,
+            table.content.clone(),
+        );
+
+        let table_start = resolved.before(table_depth);
+        let table_end = resolved.after(table_depth);
+
+        self.push_undo();
+        let mut tr = Transform::new(self.doc.clone());
+        if tr
+            .replace(
+                table_start,
+                table_end,
+                Slice::new(Fragment::from_node(new_table), 0, 0),
+            )
+            .is_ok()
+        {
+            self.doc = tr.doc;
+            let max = self.doc.content.size();
+            self.selection = Selection::cursor(self.selection.head.min(max));
+        }
+        self.redo_stack.clear();
     }
 }
