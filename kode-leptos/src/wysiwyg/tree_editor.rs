@@ -2726,6 +2726,8 @@ pub fn TreeWysiwygEditor(
 
     // ── Mousedown on atomic blocks → gap cursor ──────────────────────────
     let doc_md = doc_state.clone();
+    let doc_resize = doc_state.clone();
+    let on_change_resize = on_change.clone();
     let on_mousedown = move |ev: MouseEvent| {
         let Some(target) = ev.target() else { return };
         let Some(target_el) = target.dyn_ref::<web_sys::Element>() else { return };
@@ -2762,6 +2764,32 @@ pub fn TreeWysiwygEditor(
                 break;
             }
             walk = current.parent_element();
+        }
+
+        // If the mousedown landed on a resize handle, start the column
+        // resize drag immediately (before extension-block detection).
+        if !readonly && target_el.class_list().contains("kode-table-col-resize") {
+            let wrapper = find_ancestor_by_class(target_el, "kode-table-wrapper");
+            if let Some(wrapper) = wrapper {
+                if let (Some(cl), Some(cr)) = (
+                    target_el.get_attribute("data-col-left"),
+                    target_el.get_attribute("data-col-right"),
+                ) {
+                    if let (Ok(col_left), Ok(col_right)) = (cl.parse::<usize>(), cr.parse::<usize>()) {
+                        let _ = target_el.class_list().add_1("kode-resizing");
+                        start_column_resize_drag(
+                            &wrapper,
+                            col_left,
+                            col_right,
+                            ev.client_x() as f64,
+                            doc_resize.clone(),
+                            on_change_resize.clone(),
+                            version,
+                        );
+                        return;
+                    }
+                }
+            }
         }
 
         if readonly { return; }
@@ -2921,7 +2949,6 @@ pub fn TreeWysiwygEditor(
                     let mut table_col_header: Option<web_sys::Element> = None;
                     let mut table_row_handle: Option<web_sys::Element> = None;
                     let mut table_sel_delete: Option<web_sys::Element> = None;
-                    let mut table_col_resize: Option<web_sys::Element> = None;
                     while let Some(ref current) = el {
                         if copy_btn.is_none() && current.class_list().contains("wysiwyg-code-copy") {
                             copy_btn = Some(current.clone());
@@ -2947,9 +2974,9 @@ pub fn TreeWysiwygEditor(
                             table_sel_delete = Some(current.clone());
                             break;
                         }
+                        // Resize handles are handled in mousedown, not click.
                         if current.class_list().contains("kode-table-col-resize") {
-                            table_col_resize = Some(current.clone());
-                            break;
+                            return;
                         }
                         if delete_btn.is_none() && current.class_list().contains("wysiwyg-attachment-delete") {
                             delete_btn = Some(current.clone());
@@ -3124,34 +3151,6 @@ pub fn TreeWysiwygEditor(
 
                         // Create and show delete button on the handle.
                         show_row_delete_button(wrapper, handle, &cell_pos_str);
-                        return;
-                    }
-
-                    // ── Column resize handle drag ──────────────────────────
-                    if let Some(ref handle) = table_col_resize {
-                        if readonly { return; }
-                        ev.prevent_default();
-                        ev.stop_propagation();
-
-                        let wrapper = find_ancestor_by_class(handle, "kode-table-wrapper");
-                        let Some(wrapper) = wrapper else { return };
-
-                        let Some(col_left_str) = handle.get_attribute("data-col-left") else { return };
-                        let Some(col_right_str) = handle.get_attribute("data-col-right") else { return };
-                        let Ok(col_left) = col_left_str.parse::<usize>() else { return };
-                        let Ok(col_right) = col_right_str.parse::<usize>() else { return };
-
-                        let _ = handle.class_list().add_1("kode-resizing");
-
-                        start_column_resize_drag(
-                            &wrapper,
-                            col_left,
-                            col_right,
-                            ev.client_x() as f64,
-                            doc_state_click.clone(),
-                            on_change_click.clone(),
-                            version,
-                        );
                         return;
                     }
 
