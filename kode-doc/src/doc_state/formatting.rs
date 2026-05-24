@@ -791,15 +791,35 @@ impl DocState {
                 let list_start = re_resolved.before(depth);
                 let list_end = re_resolved.after(depth);
 
-                // Re-wrap children with the target item attrs.
+                // Re-wrap children with the target item attrs, converting any
+                // non-Paragraph textblocks (e.g. Heading) to Paragraph.
                 let new_children: Vec<Node> = list_node
                     .content
                     .iter()
                     .map(|child| {
+                        let content = Fragment::from_vec(
+                            child
+                                .content
+                                .iter()
+                                .map(|block| {
+                                    if block.node_type.is_textblock()
+                                        && block.node_type != NodeType::Paragraph
+                                    {
+                                        Node::branch_with_attrs(
+                                            NodeType::Paragraph,
+                                            Attrs::new(),
+                                            block.content.clone(),
+                                        )
+                                    } else {
+                                        block.clone()
+                                    }
+                                })
+                                .collect(),
+                        );
                         Node::branch_with_attrs(
                             NodeType::ListItem,
                             target_item_attrs.clone(),
-                            child.content.clone(),
+                            content,
                         )
                     })
                     .collect();
@@ -838,7 +858,24 @@ impl DocState {
                 }
                 let wrapped_head = new_head + 2;
                 let max = tr2.doc.content.size();
-                (tr2.doc, Selection::cursor(wrapped_head.min(max)))
+                let final_head = wrapped_head.min(max);
+
+                // If the wrapped textblock is not a Paragraph (e.g. Heading),
+                // convert it to Paragraph so list items render correctly.
+                let resolved = tr2.doc.resolve(final_head);
+                let parent = resolved.parent();
+                if parent.node_type != NodeType::Paragraph && parent.node_type.is_textblock() {
+                    let block_start = resolved.before(resolved.depth);
+                    let block_end = resolved.after(resolved.depth);
+                    if tr2
+                        .set_block_type(block_start, block_end, NodeType::Paragraph, Attrs::new())
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+
+                (tr2.doc, Selection::cursor(final_head))
             }
         };
 

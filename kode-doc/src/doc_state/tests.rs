@@ -4530,6 +4530,72 @@ mod auto_convert_list_tests {
         let md2 = ds2.to_markdown();
         assert_eq!(md1, md2, "markdown roundtrip should be stable");
     }
+
+    #[test]
+    fn auto_convert_heading_to_task_list_converts_to_paragraph() {
+        // Start with a heading: Doc > Heading > "Alpha"
+        let mut ds = DocState::from_markdown("# Alpha\n");
+        assert_eq!(ds.doc.child(0).node_type, NodeType::Heading);
+        ds.set_selection(Selection::cursor(1)); // start of heading text
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::TaskList));
+        // The inner block should be Paragraph, not Heading
+        let resolved = ds.doc.resolve(ds.selection.head);
+        let parent = resolved.parent();
+        assert_eq!(
+            parent.node_type,
+            NodeType::Paragraph,
+            "expected Paragraph inside list item, got {:?}",
+            parent.node_type
+        );
+        let md = ds.to_markdown();
+        assert!(
+            md.contains("[ ] Alpha") || md.contains("- [ ] Alpha"),
+            "expected task list markdown, got: {md:?}"
+        );
+    }
+
+    #[test]
+    fn auto_convert_heading_to_bullet_list_converts_to_paragraph() {
+        let mut ds = DocState::from_markdown("# Title\n");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("-");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::BulletList));
+        let resolved = ds.doc.resolve(ds.selection.head);
+        let parent = resolved.parent();
+        assert_eq!(
+            parent.node_type,
+            NodeType::Paragraph,
+            "expected Paragraph inside list item, got {:?}",
+            parent.node_type
+        );
+    }
+
+    #[test]
+    fn auto_convert_heading_in_bullet_to_task_converts_to_paragraph() {
+        // This tests the Some(depth) branch.
+        // First create a bullet list from a heading.
+        let mut ds = DocState::from_markdown("# stuff\n");
+        ds.set_selection(Selection::cursor(1));
+        ds.insert_text("-");
+        assert!(ds.try_auto_convert_list_on_space());
+        // Now convert bullet to task list by typing "[]" at start
+        let head = ds.selection.head;
+        ds.set_selection(Selection::cursor(head));
+        ds.insert_text("[]");
+        assert!(ds.try_auto_convert_list_on_space());
+        assert!(ds.is_in_node(NodeType::TaskList));
+        let resolved = ds.doc.resolve(ds.selection.head);
+        let parent = resolved.parent();
+        assert_eq!(
+            parent.node_type,
+            NodeType::Paragraph,
+            "expected Paragraph inside converted list item, got {:?}",
+            parent.node_type
+        );
+    }
 }
 
 mod task_list_tests {
