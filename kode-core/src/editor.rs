@@ -1197,6 +1197,15 @@ mod tests {
     }
 
     #[test]
+    fn word_start_before_cursor_crosses_line_boundary() {
+        let mut ed = Editor::new("annotations:\n    axis: x");
+        ed.set_cursor(Position::new(1, 1)); // col 1 of "    axis: x"
+        let pos = ed.word_start_before_cursor();
+        // Word boundary scans back past whitespace to "annotations:" on line 0
+        assert_eq!(pos.line, 0); // must be on a different line than cursor
+    }
+
+    #[test]
     fn insert_multiple_spaces_at_end_of_line() {
         let mut ed = Editor::new("hello");
         ed.set_cursor(Position::new(0, 5));
