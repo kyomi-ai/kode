@@ -596,10 +596,13 @@ div.wysiwyg-code-block code {
 .tree-wysiwyg-scroll-container h6:empty,
 .tree-wysiwyg-scroll-container li:empty,
 .tree-wysiwyg-scroll-container blockquote:empty,
-.tree-wysiwyg-scroll-container code:empty,
+.tree-wysiwyg-scroll-container code:empty {
+    min-height: 1.4em;
+}
+
 .tree-wysiwyg-scroll-container td:empty,
 .tree-wysiwyg-scroll-container th:empty {
-    min-height: 1.4em;
+    height: 1.4em;
 }
 
 /* Placeholder on empty paragraphs (only when slash menu is enabled) */
