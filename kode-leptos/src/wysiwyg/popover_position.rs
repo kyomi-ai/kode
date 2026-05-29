@@ -75,7 +75,10 @@ pub fn compute_position_relative(
         (abs_top - container_rect.top(), (space_below - gap).max(100.0))
     };
 
-    let left = anchor_rect.left() - container_rect.left();
+    let container_w = container_rect.width();
+    let popover_width = 300.0;
+    let raw_left = anchor_rect.left() - container_rect.left();
+    let left = raw_left.max(pad).min((container_w - popover_width - pad).max(pad));
 
     Some(PopoverPosition {
         top,
