@@ -3365,7 +3365,15 @@ fn compute_floating_toolbar_pos(
     } else {
         range_rect.top() - container_rect.top() - gap
     };
-    let left = (range_rect.left() + range_rect.right()) / 2.0 - container_rect.left();
+    let center = (range_rect.left() + range_rect.right()) / 2.0 - container_rect.left();
+    let container_w = container_rect.width();
+    let pad = 8.0;
+    let half_w = 200.0;
+    let left = if container_w > half_w * 2.0 + pad * 2.0 {
+        center.max(half_w + pad).min(container_w - half_w - pad)
+    } else {
+        container_w / 2.0
+    };
     (top, left, flip)
 }
 
