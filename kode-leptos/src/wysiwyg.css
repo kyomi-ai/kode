@@ -600,6 +600,11 @@ div.wysiwyg-code-block code {
     min-height: 1.4em;
 }
 
+.tree-wysiwyg-scroll-container td:empty::before,
+.tree-wysiwyg-scroll-container th:empty::before {
+    content: "\200b";
+}
+
 /* Placeholder on empty paragraphs (only when slash menu is enabled) */
 .kode-slash-enabled p:empty::before {
     content: var(--kode-placeholder-text, "Type / for commands");
