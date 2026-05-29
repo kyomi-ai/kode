@@ -816,7 +816,7 @@ body.kode-dragging * {
 }
 
 .wysiwyg-list-item > .kode-drag-handle {
-    left: var(--kode-list-drag-handle-left, -24px);
+    left: var(--kode-list-drag-handle-left, -44px);
 }
 
 .wysiwyg-list-item:hover > .kode-drag-handle {
