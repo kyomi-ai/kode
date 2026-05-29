@@ -600,9 +600,9 @@ div.wysiwyg-code-block code {
     min-height: 1.4em;
 }
 
-.tree-wysiwyg-scroll-container td:empty,
-.tree-wysiwyg-scroll-container th:empty {
-    height: 1.4em;
+.tree-wysiwyg-scroll-container td:empty::before,
+.tree-wysiwyg-scroll-container th:empty::before {
+    content: "\200b";
 }
 
 /* Placeholder on empty paragraphs (only when slash menu is enabled) */
