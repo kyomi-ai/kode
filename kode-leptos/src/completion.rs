@@ -262,7 +262,11 @@ pub(crate) fn spawn_completion_pipeline(
             // Compute the prefix: text from word_start to cursor on the current line
             let prefix = {
                 let line_text = text.lines().nth(cursor.line).unwrap_or("");
-                let start_col = word_start.col.min(line_text.len());
+                let start_col = if word_start.line == cursor.line {
+                    word_start.col.min(line_text.len())
+                } else {
+                    0
+                };
                 let end_col = cursor.col.min(line_text.len());
                 line_text[start_col..end_col].to_string()
             };

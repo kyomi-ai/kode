@@ -712,7 +712,11 @@ pub fn CodeEditor(
                     if let Some(word_start) = comp_state.word_start() {
                         let text = ed.text();
                         let line_text = text.lines().nth(cursor.line).unwrap_or("");
-                        let start_col = word_start.col.min(line_text.len());
+                        let start_col = if word_start.line == cursor.line {
+                            word_start.col.min(line_text.len())
+                        } else {
+                            0
+                        };
                         let end_col = cursor.col.min(line_text.len());
                         let prefix = &line_text[start_col..end_col];
                         comp_state.update_filter(prefix);
