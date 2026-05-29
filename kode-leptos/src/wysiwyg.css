@@ -596,7 +596,9 @@ div.wysiwyg-code-block code {
 .tree-wysiwyg-scroll-container h6:empty,
 .tree-wysiwyg-scroll-container li:empty,
 .tree-wysiwyg-scroll-container blockquote:empty,
-.tree-wysiwyg-scroll-container code:empty {
+.tree-wysiwyg-scroll-container code:empty,
+.tree-wysiwyg-scroll-container td:empty,
+.tree-wysiwyg-scroll-container th:empty {
     min-height: 1.4em;
 }
 
