@@ -20,6 +20,19 @@ scripts/
 CLAUDE.md
 .review-approval
 
+# Ad-hoc debug/verify test specs
+tests/debug-*.spec.ts
+tests/verify-*.spec.ts
+tests/dom-inspect*.spec.ts
+tests/measure-*.spec.ts
+tests/stress-*.spec.ts
+tests/cursor-*.spec.ts
+tests/wysiwyg-*.spec.ts
+
+# Other ad-hoc files
+demo/gzip_proxy.py
+docs/review-logs/
+
 # Editors / OS
 .DS_Store
 .idea/
