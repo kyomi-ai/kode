@@ -29,6 +29,8 @@ use crate::toolbar::{BuiltinButton, InjectCommand, SlashMenuItem, ToolbarItem, d
 use super::attachment::{AttachmentNodeType, ClickAttachmentRequest, DeleteAttachmentRequest};
 use super::clipboard::{html_escape, extract_kode_markdown};
 use super::doc_renderer::{doc_to_segments, RenderSegment};
+#[cfg(target_arch = "wasm32")]
+use super::doc_renderer::{invalidate_text_slots, slot_ranges};
 use super::dom_helpers::apply_md_command;
 use super::popover_position::compute_position_relative;
 
@@ -134,7 +136,13 @@ pub fn TreeWysiwygEditor(
     let keydown_handled = std::rc::Rc::new(std::cell::Cell::new(false));
     let mouse_selecting = std::rc::Rc::new(std::cell::Cell::new(false));
     let observing_dom_input = std::rc::Rc::new(std::cell::Cell::new(false));
-    let dom_dirty = std::rc::Rc::new(std::cell::Cell::new(false));
+    // Blocks the browser mutated behind the editor's back — see the
+    // MutationObserver path below. Recorded as container child indices, which
+    // the DOM patcher walks in lockstep with its slots, so index == slot.
+    let dom_dirty_slots = std::rc::Rc::new(std::cell::RefCell::new(Vec::<usize>::new()));
+    // Set when such a mutation cannot be attributed to a slot. Forces a full
+    // rebuild, which is correct but discards every mounted extension view.
+    let dom_dirty_all = std::rc::Rc::new(std::cell::Cell::new(false));
     let mutation_observer: std::rc::Rc<std::cell::RefCell<Option<web_sys::MutationObserver>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
     let floating_pos: RwSignal<Option<(f64, f64, bool)>> = RwSignal::new(None);
@@ -355,8 +363,10 @@ pub fn TreeWysiwygEditor(
     let keydown_handled_effect = keydown_handled.clone();
     let mo_for_patch = mutation_observer.clone();
     let keydown_handled_for_mo = keydown_handled.clone();
-    let dom_dirty_for_effect = dom_dirty.clone();
-    let dom_dirty_for_mo = dom_dirty.clone();
+    let dom_dirty_slots_for_effect = dom_dirty_slots.clone();
+    let dom_dirty_slots_for_mo = dom_dirty_slots.clone();
+    let dom_dirty_all_for_effect = dom_dirty_all.clone();
+    let dom_dirty_all_for_mo = dom_dirty_all.clone();
     Effect::new(move |_| {
         let _v = version.get();
         let is_composing = composing.get();
@@ -403,15 +413,21 @@ pub fn TreeWysiwygEditor(
 
                 let mut old = prev_segments_for_effect.borrow_mut();
 
-                // If the DOM was modified by browser-native text input (MO
-                // path), prev_segments is stale. Clear both the cache and
-                // the DOM children so patch_segments does a full rebuild.
-                if dom_dirty_for_effect.get() {
+                // Browser-native text input (the MO path) edits the DOM
+                // without re-rendering, so the cached segments for those
+                // blocks describe the DOM as it was before the keystroke.
+                // Invalidate just those blocks; everything else — extension
+                // views and their scroll position included — stays put.
+                if dom_dirty_all_for_effect.replace(false) {
                     old.clear();
+                    dom_dirty_slots_for_effect.borrow_mut().clear();
                     while let Some(child) = container_el.first_child() {
                         let _ = container_el.remove_child(&child);
                     }
-                    dom_dirty_for_effect.set(false);
+                } else {
+                    let dirty: Vec<usize> =
+                        dom_dirty_slots_for_effect.borrow_mut().drain(..).collect();
+                    invalidate_text_slots(&mut old, &dirty);
                 }
 
                 patch_segments(
@@ -453,7 +469,7 @@ pub fn TreeWysiwygEditor(
         // Keep the variables alive for the wasm32 cfg block above.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (&segments_memo, &prev_segments_for_effect, &ext_ctx_for_effect, &can_drag_for_effect, &mo_for_patch, &dom_dirty_for_effect);
+            let _ = (&segments_memo, &prev_segments_for_effect, &ext_ctx_for_effect, &can_drag_for_effect, &mo_for_patch, &dom_dirty_slots_for_effect, &dom_dirty_all_for_effect);
         }
 
         let doc_raf = doc_for_sel.clone();
@@ -832,7 +848,8 @@ pub fn TreeWysiwygEditor(
                 let observing_mo = observing_mo.clone();
                 let container_mo = container_for_mo.clone();
                 let kd_handled_mo = keydown_handled_for_mo.clone();
-                let dom_dirty_mo = dom_dirty_for_mo.clone();
+                let dom_dirty_slots_mo = dom_dirty_slots_for_mo.clone();
+                let dom_dirty_all_mo = dom_dirty_all_for_mo.clone();
                 move |records: js_sys::Array, _observer: web_sys::MutationObserver| {
                     if !observing_mo.get() {
                         return;
@@ -899,6 +916,20 @@ pub fn TreeWysiwygEditor(
                         } else if del_from != del_to {
                             ds.backspace();
                         }
+
+                        // Record which block the browser rewrote so the next
+                        // render patches it rather than rebuilding the
+                        // document. An unattributable mutation is rare, and
+                        // falls back to the full rebuild.
+                        match container_child_index(&container_mo, pos_el.as_ref()) {
+                            Some(slot) => {
+                                let mut dirty = dom_dirty_slots_mo.borrow_mut();
+                                if !dirty.contains(&slot) {
+                                    dirty.push(slot);
+                                }
+                            }
+                            None => dom_dirty_all_mo.set(true),
+                        }
                         changed = true;
                     }
 
@@ -909,9 +940,8 @@ pub fn TreeWysiwygEditor(
                     // ProseMirror-style: do NOT re-render the DOM. The browser
                     // already applied the text change correctly. Just update
                     // DocState, emit on_change, update formatting, and fix the
-                    // stale data-pos attributes in-place. Mark the DOM as
-                    // dirty so the next full re-render rewrites all blocks.
-                    dom_dirty_mo.set(true);
+                    // stale data-pos attributes in-place. The blocks it touched
+                    // were recorded above so the next render rewrites them.
                     let md = ds.to_markdown();
                     let fmt = ds.formatting_at_cursor();
                     drop(ds);
@@ -3719,6 +3749,35 @@ fn node_offset_to_doc_pos(
 
 /// Walk up from a node to find the nearest Element ancestor (or self) that
 /// has a `data-pos-start` attribute.
+/// Index of the container's direct child that contains `node`.
+///
+/// The DOM patcher walks its slot list and the container's children in
+/// lockstep, so this index is the slot index of the block `node` lives in.
+/// Returns `None` for a node that is not inside the container — a block the
+/// browser detached mid-edit, say — which callers treat as "rebuild
+/// everything" rather than silently skipping the invalidation.
+fn container_child_index(container: &web_sys::Element, node: &web_sys::Node) -> Option<usize> {
+    let container_node: &web_sys::Node = container.as_ref();
+    let mut current = node.clone();
+
+    loop {
+        let parent = current.parent_node()?;
+        if !parent.is_same_node(Some(container_node)) {
+            current = parent;
+            continue;
+        }
+
+        let children = container.children();
+        return (0..children.length())
+            .find(|&i| {
+                children
+                    .item(i)
+                    .is_some_and(|child| child.is_same_node(Some(&current)))
+            })
+            .map(|i| i as usize);
+    }
+}
+
 fn find_pos_ancestor(node: &web_sys::Node, container: &web_sys::Element) -> Option<web_sys::Element> {
     let mut current: Option<web_sys::Node> = Some(node.clone());
     while let Some(ref n) = current {
@@ -4192,44 +4251,40 @@ enum DomSlot<'a> {
 /// extension blocks into grid groups.
 #[cfg(target_arch = "wasm32")]
 fn group_into_slots<'a>(segments: &'a [RenderSegment]) -> Vec<DomSlot<'a>> {
-    let mut slots = Vec::new();
-    let mut i = 0;
-
-    while i < segments.len() {
-        match &segments[i] {
-            RenderSegment::TextBlock { html } => {
-                slots.push(DomSlot::Text { html });
-                i += 1;
-            }
-            RenderSegment::ExtensionBlock { lang, content, pos_start, pos_end, col_span } => {
-                if let Some(span) = col_span {
-                    // Start a grid group — collect consecutive extension blocks with col_span.
-                    let mut items = vec![(lang.as_str(), content.as_str(), *pos_start, *pos_end, *span)];
-                    i += 1;
-                    while i < segments.len() {
-                        if let RenderSegment::ExtensionBlock { lang: l, content: c, pos_start: ps, pos_end: pe, col_span: Some(s) } = &segments[i] {
-                            items.push((l.as_str(), c.as_str(), *ps, *pe, *s));
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    // Solo col_span blocks are also wrapped in a grid for consistent layout.
-                    slots.push(DomSlot::Grid { items });
-                } else {
-                    slots.push(DomSlot::Extension {
-                        lang,
-                        content,
-                        pos_start: *pos_start,
-                        pos_end: *pos_end,
-                    });
-                    i += 1;
-                }
-            }
-        }
-    }
-
-    slots
+    slot_ranges(segments)
+        .into_iter()
+        .map(|(start, end)| match &segments[start] {
+            RenderSegment::TextBlock { html } => DomSlot::Text { html },
+            RenderSegment::ExtensionBlock {
+                lang,
+                content,
+                pos_start,
+                pos_end,
+                col_span: None,
+            } => DomSlot::Extension {
+                lang,
+                content,
+                pos_start: *pos_start,
+                pos_end: *pos_end,
+            },
+            // A col_span run — solo blocks included, for consistent layout.
+            RenderSegment::ExtensionBlock { .. } => DomSlot::Grid {
+                items: segments[start..end]
+                    .iter()
+                    .filter_map(|segment| match segment {
+                        RenderSegment::ExtensionBlock {
+                            lang,
+                            content,
+                            pos_start,
+                            pos_end,
+                            col_span: Some(span),
+                        } => Some((lang.as_str(), content.as_str(), *pos_start, *pos_end, *span)),
+                        _ => None,
+                    })
+                    .collect(),
+            },
+        })
+        .collect()
 }
 
 /// Create a new DOM element for a slot.

@@ -978,6 +978,66 @@ pub fn doc_to_segments(
     segments
 }
 
+/// Segment index ranges backing each DOM slot, in slot order.
+///
+/// The DOM patcher merges consecutive `col_span` extension blocks into a
+/// single grid slot, so slot indices and segment indices diverge as soon as a
+/// grid is present. Both the patcher and the MutationObserver invalidation
+/// path derive their boundaries from here so the two cannot drift apart.
+pub fn slot_ranges(segments: &[RenderSegment]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+
+    while i < segments.len() {
+        let start = i;
+        if matches!(
+            segments[i],
+            RenderSegment::ExtensionBlock { col_span: Some(_), .. }
+        ) {
+            i += 1;
+            while matches!(
+                segments.get(i),
+                Some(RenderSegment::ExtensionBlock { col_span: Some(_), .. })
+            ) {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+        ranges.push((start, i));
+    }
+
+    ranges
+}
+
+/// Invalidate the cached HTML of the text blocks backing `slots`.
+///
+/// Plain text input is applied to the contenteditable DOM by the browser
+/// itself and synced back to the document by the MutationObserver, which
+/// leaves the cached segment for that block describing the pre-typing DOM.
+/// If a later edit returns the block to exactly that text — pressing
+/// Backspace once after typing a character is the common case — the cached
+/// and freshly rendered HTML compare equal and the patcher would leave the
+/// stale DOM in place. Clearing the cached HTML forces it to rewrite that one
+/// block.
+///
+/// Extension blocks are deliberately left alone: their DOM and the Leptos
+/// view mounted into it (a chart, for instance) must survive the patch.
+pub fn invalidate_text_slots(segments: &mut [RenderSegment], slots: &[usize]) {
+    let ranges = slot_ranges(segments);
+
+    for &slot in slots {
+        let Some(&(start, end)) = ranges.get(slot) else {
+            continue;
+        };
+        for segment in &mut segments[start..end] {
+            if let RenderSegment::TextBlock { html } = segment {
+                html.clear();
+            }
+        }
+    }
+}
+
 /// Check if a node is a code block handled by an extension.
 fn is_extension_block(node: &Node, extensions: &[Arc<dyn Extension>]) -> bool {
     if node.node_type != NodeType::CodeBlock {
@@ -2347,4 +2407,122 @@ mod tests {
             _ => panic!("expected ExtensionBlock"),
         }
     }
+
+    // ── Slot mapping + stale-DOM invalidation ───────────────────────
+
+    fn text_seg(html: &str) -> RenderSegment {
+        RenderSegment::TextBlock { html: html.to_string() }
+    }
+
+    fn ext_seg(content: &str, col_span: Option<u8>) -> RenderSegment {
+        RenderSegment::ExtensionBlock {
+            lang: "chart".to_string(),
+            content: content.to_string(),
+            pos_start: 0,
+            pos_end: 1,
+            col_span,
+        }
+    }
+
+    #[test]
+    fn slot_ranges_maps_ungrouped_segments_one_to_one() {
+        let segs = vec![text_seg("<p>a</p>"), ext_seg("one", None), text_seg("<p>b</p>")];
+        assert_eq!(slot_ranges(&segs), vec![(0, 1), (1, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn slot_ranges_groups_consecutive_col_span_blocks() {
+        let segs = vec![
+            text_seg("<p>a</p>"),
+            ext_seg("one", Some(6)),
+            ext_seg("two", Some(6)),
+            text_seg("<p>b</p>"),
+            ext_seg("three", Some(12)),
+        ];
+        // The two half-width charts share one grid slot, so slot 2 is the
+        // trailing paragraph — not the segment at index 2.
+        assert_eq!(slot_ranges(&segs), vec![(0, 1), (1, 3), (3, 4), (4, 5)]);
+    }
+
+    #[test]
+    fn slot_ranges_of_an_empty_document_is_empty() {
+        assert!(slot_ranges(&[]).is_empty());
+    }
+
+    #[test]
+    fn invalidate_text_slots_clears_only_the_named_block() {
+        let mut segs = vec![text_seg("<p>a</p>"), text_seg("<p>b</p>"), text_seg("<p>c</p>")];
+        invalidate_text_slots(&mut segs, &[1]);
+        assert_eq!(segs[0], text_seg("<p>a</p>"));
+        assert_eq!(segs[1], text_seg(""));
+        assert_eq!(segs[2], text_seg("<p>c</p>"));
+    }
+
+    #[test]
+    fn invalidate_text_slots_leaves_extension_blocks_intact() {
+        // Extension segments must compare equal after invalidation — that
+        // equality is what stops the patcher from remounting the chart view.
+        let mut segs = vec![ext_seg("one", None), ext_seg("two", Some(6)), ext_seg("three", Some(6))];
+        let before = segs.clone();
+        invalidate_text_slots(&mut segs, &[0, 1]);
+        assert_eq!(segs, before);
+    }
+
+    #[test]
+    fn invalidate_text_slots_ignores_out_of_range_slots() {
+        let mut segs = vec![text_seg("<p>a</p>")];
+        invalidate_text_slots(&mut segs, &[7]);
+        assert_eq!(segs, vec![text_seg("<p>a</p>")]);
+    }
+
+    /// Regression: typing a character then pressing Backspace once used to
+    /// rebuild the whole document, remounting every chart and scrolling the
+    /// editor back to the top.
+    ///
+    /// Plain text input is applied to the DOM by the browser and synced back
+    /// without a re-render, so the cached segments still describe the
+    /// pre-typing DOM. Backspacing that character returns the document to
+    /// exactly its cached state, and a positional diff then sees no change
+    /// and leaves the typed character on screen. Invalidating just the
+    /// touched block fixes the diff without disturbing the chart.
+    #[test]
+    fn backspace_after_native_typing_repatches_the_block_but_not_the_chart() {
+        struct TestExt;
+        impl Extension for TestExt {
+            fn name(&self) -> &str { "test-ext" }
+            fn code_block_languages(&self) -> &[&str] { &["chart"] }
+        }
+        let exts: Vec<Arc<dyn Extension>> = vec![Arc::new(TestExt)];
+
+        let doc_with = |text: &str| {
+            Node::branch(
+                NodeType::Doc,
+                Fragment::from_vec(vec![
+                    Node::branch(NodeType::Paragraph, Fragment::from_node(Node::new_text(text))),
+                    Node::branch_with_attrs(
+                        NodeType::CodeBlock,
+                        code_block_attrs("chart"),
+                        Fragment::from_node(Node::new_text("type: bar")),
+                    ),
+                ]),
+            )
+        };
+
+        // Rendered once on mount, then cached as the patcher's "old" list.
+        let mut cached = doc_to_segments(&doc_with("Hello"), &exts, &[]);
+        assert_eq!(slot_ranges(&cached), vec![(0, 1), (1, 2)]);
+        assert_ne!(cached[0], text_seg(""), "a rendered block is never empty");
+
+        // The browser typed "x" into the paragraph and the MutationObserver
+        // synced it to the document — no re-render, so `cached` is untouched.
+        // Backspace then returns the document to its pre-typing text.
+        let fresh = doc_to_segments(&doc_with("Hello"), &exts, &[]);
+        assert_eq!(cached, fresh, "the round trip leaves the diff nothing to see");
+
+        invalidate_text_slots(&mut cached, &[0]);
+
+        assert_ne!(cached[0], fresh[0], "the edited paragraph is rewritten");
+        assert_eq!(cached[1], fresh[1], "the chart is left mounted");
+    }
+
 }
