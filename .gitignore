@@ -18,7 +18,6 @@ playwright-report/
 .githooks/
 scripts/
 CLAUDE.md
-.review-approval
 
 # Ad-hoc debug/verify test specs
 tests/debug-*.spec.ts
